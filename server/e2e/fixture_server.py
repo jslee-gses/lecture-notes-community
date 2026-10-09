@@ -22,6 +22,10 @@ long_document["segments"] = [
      "text": f"긴 전사 {number} C++ [배열] <script>window.__injected=true</script>" if number == 2 else f"긴 전사 {number} 배열 설명"}
     for number in range(120)
 ]
+long_document["summary_note"]["key_points"] = [
+    {**long_document["summary_note"]["key_points"][0], "text": f"긴 강의의 핵심 내용 {number}"}
+    for number in range(60)
+]
 long_saved = repository.insert_or_get(long_document, "e2e-client")
 app = create_app(Settings(public_base_url="http://127.0.0.1:8765", ip_hash_secret=b"e2e"), repository, clock=lambda: now)
 

@@ -43,6 +43,7 @@ def viewer_router(repository) -> APIRouter:
             request=request,
             name="catalog.html",
             context={"lectures": lectures, "page": page, "has_next": has_next, "timestamp": timestamp},
+            headers={"X-Robots-Tag": "noindex, nofollow"},
         )
 
     @router.get("/api/lectures", include_in_schema=False)

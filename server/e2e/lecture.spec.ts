@@ -74,6 +74,19 @@ test("search_highlight_is_safe_and_player_stays_visible", async ({ page }) => {
   await expect(page.locator("[data-transcript-row] mark")).toHaveCount(0);
 });
 
+test("long_tab_panel_scrolls_without_moving_player", async ({ page }) => {
+  await page.route("https://www.youtube.com/iframe_api", (route) => route.abort());
+  await page.goto("/fixture-long");
+  await page.getByRole("tab", { name: "강의 요약" }).click();
+  const player = page.locator(".player-frame");
+  const panel = page.getByRole("tabpanel", { name: "강의 요약" });
+  const before = await player.boundingBox();
+  await panel.evaluate((node) => { node.scrollTop = 600; });
+  expect(await panel.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  const after = await player.boundingBox();
+  expect(after?.y).toBeCloseTo(before!.y, 0);
+});
+
 test("mobile_order_and_white_background", async ({ page }) => {
   await page.route("https://www.youtube.com/iframe_api", (route) => route.abort());
   await page.goto("/fixture");

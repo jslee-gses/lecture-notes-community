@@ -83,6 +83,7 @@ def test_catalog_empty_and_new_public_entry():
     client, repository, _ = catalog_service()
     empty = client.get("/")
     assert empty.status_code == 200
+    assert "noindex" in empty.headers["x-robots-tag"]
     assert "등록된 강의가 없습니다" in empty.text
     public = repository.insert_or_get(catalog_document("공개 강의"), "test-client", is_listed=True)
     response = client.get("/")
