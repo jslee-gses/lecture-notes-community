@@ -130,7 +130,7 @@ def test_too_large(service):
 def test_unsupported_schema(service):
     client, repository, _ = service()
     doc = document()
-    doc["schema_version"] = "2.0"
+    doc["schema_version"] = "3.0"
     response = upload(client, doc)
     assert response.status_code == 422
     assert "/schema_version" in response.json()["detail"]

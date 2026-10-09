@@ -1,11 +1,16 @@
 import { Ajv2020 } from "@ajv/2020";
-import schema from "../schema/lecture.schema.json" with { type: "json" };
+import schemaV1 from "../schema/lecture.schema.json" with { type: "json" };
+import schemaV2 from "../schema/lecture-v2.schema.json" with { type: "json" };
 
 export interface Segment {
   idx: number;
   start_sec: number;
   end_sec: number;
   text: string;
+}
+
+export interface TranslatedSegment extends Segment {
+  translation_ko: string;
 }
 
 export interface OutlineRange {
@@ -21,7 +26,7 @@ export interface Chapter extends OutlineRange {
   children: OutlineRange[];
 }
 
-export interface LectureDocument {
+export interface KoreanLectureDocument {
   schema_version: "1.0";
   run_id: string;
   lecture: {
@@ -47,8 +52,28 @@ export interface LectureDocument {
   }[];
 }
 
+export interface EnglishLectureDocument
+  extends
+    Omit<KoreanLectureDocument, "schema_version" | "lecture" | "segments"> {
+  schema_version: "2.0";
+  lecture:
+    & Omit<
+      KoreanLectureDocument["lecture"],
+      "caption_language" | "caption_source"
+    >
+    & {
+      caption_language: "en";
+      caption_source: "manual" | "auto";
+      translation_language: "ko";
+    };
+  segments: TranslatedSegment[];
+}
+
+export type LectureDocument = KoreanLectureDocument | EnglishLectureDocument;
+
 const ajv = new Ajv2020({ allErrors: true, strict: true });
-const validateSchema = ajv.compile<LectureDocument>(schema);
+const validateSchemaV1 = ajv.compile<KoreanLectureDocument>(schemaV1);
+const validateSchemaV2 = ajv.compile<EnglishLectureDocument>(schemaV2);
 
 function fail(path: string, detail: string): never {
   throw new Error(`${path}: ${detail}`);
@@ -71,6 +96,15 @@ function checkRange(
 }
 
 export function validateLecture(doc: unknown): LectureDocument {
+  const version = doc && typeof doc === "object" && !Array.isArray(doc)
+    ? (doc as { schema_version?: unknown }).schema_version
+    : undefined;
+  if (version !== "1.0" && version !== "2.0") {
+    fail("/schema_version", "unsupported version");
+  }
+  const validateSchema = version === "1.0"
+    ? validateSchemaV1
+    : validateSchemaV2;
   if (!validateSchema(doc)) {
     const error = validateSchema.errors?.[0];
     const suffix = error?.keyword === "required" &&

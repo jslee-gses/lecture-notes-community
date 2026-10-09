@@ -7,10 +7,12 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 
-SCHEMA_PATH = Path(__file__).resolve().parents[2] / "plugins" / "lecture-notes" / "schema" / "lecture.schema.json"
-SCHEMA = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-Draft202012Validator.check_schema(SCHEMA)
-VALIDATOR = Draft202012Validator(SCHEMA)
+SCHEMA_DIR = Path(__file__).resolve().parents[2] / "plugins" / "lecture-notes" / "schema"
+VALIDATORS = {}
+for version, filename in (("1.0", "lecture.schema.json"), ("2.0", "lecture-v2.schema.json")):
+    schema = json.loads((SCHEMA_DIR / filename).read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    VALIDATORS[version] = Draft202012Validator(schema)
 
 
 def _fail(path: str, detail: str) -> None:
@@ -42,7 +44,10 @@ def _check_range(item: dict, path: str, segments: list[dict]) -> None:
 def validate_document(doc: dict) -> None:
     """Raise a JSON-pointer-like ValueError for invalid shared documents."""
     _check_finite(doc)
-    errors = sorted(VALIDATOR.iter_errors(doc), key=lambda error: (list(map(str, error.path)), error.message))
+    version = doc.get("schema_version") if isinstance(doc, dict) else None
+    if version not in VALIDATORS:
+        _fail("/schema_version", "unsupported version")
+    errors = sorted(VALIDATORS[version].iter_errors(doc), key=lambda error: (list(map(str, error.path)), error.message))
     if errors:
         error = errors[0]
         path = "".join(f"/{part}" for part in error.path)
