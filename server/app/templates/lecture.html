@@ -22,7 +22,7 @@
         <div class="video-footer"><p id="player-message">시점을 누르면 영상을 이동할 수 있습니다.</p><a data-testid="youtube-fallback" id="youtube-fallback" href="https://www.youtube.com/watch?v={{ document.lecture.video_id }}&amp;t=0s" target="_blank" rel="noopener noreferrer">YouTube에서 열기 ↗</a></div>
       </section>
       <section class="transcript-section" aria-labelledby="transcript-title">
-        <div class="section-heading"><h2 id="transcript-title">실제 자막 · 정제 전사</h2><span id="search-count" data-testid="search-count">{{ document.segments|length }}개 구간</span></div>
+        <div class="section-heading"><h2 id="transcript-title">자막</h2><span id="search-count" data-testid="search-count">{{ document.segments|length }}개 구간</span></div>
         <div class="search-bar"><label for="transcript-search">전사 검색</label><input id="transcript-search" data-testid="transcript-search" type="search" placeholder="전사에서 검색" autocomplete="off"></div>
         <div class="transcript-list" tabindex="0" aria-label="시간순 전사">
           {% for segment in document.segments %}
