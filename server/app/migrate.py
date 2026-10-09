@@ -6,16 +6,16 @@ from pathlib import Path
 import psycopg
 
 
-MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "001_init.sql"
+MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations"
 MIGRATION_LOCK = 792436152844
 
 
 def apply_migrations(database_url: str) -> None:
-    sql = MIGRATION.read_text(encoding="utf-8")
     with psycopg.connect(database_url) as connection:
         with connection.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(%s)", (MIGRATION_LOCK,))
-            cursor.execute(sql)
+            for migration in sorted(MIGRATIONS.glob("[0-9][0-9][0-9]_*.sql")):
+                cursor.execute(migration.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
