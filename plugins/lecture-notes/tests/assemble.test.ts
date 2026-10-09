@@ -1,11 +1,12 @@
 import { assembleLecture, type AssemblyInputs } from "../scripts/assemble.ts";
-import type { LectureDocument } from "../scripts/types.ts";
+import * as assembly from "../scripts/assemble.ts";
+import type { KoreanLectureDocument } from "../scripts/types.ts";
 
 const fixture = JSON.parse(
   await Deno.readTextFile(
     new URL("./fixtures/valid-lecture.json", import.meta.url),
   ),
-) as LectureDocument;
+) as KoreanLectureDocument;
 
 function inputs(): AssemblyInputs {
   return {
@@ -148,5 +149,106 @@ Deno.test("test_unsupported_assembly_version", () => {
     if (
       !(error instanceof Error) || !error.message.includes("/schema_version")
     ) throw error;
+  }
+});
+
+const englishFixture = JSON.parse(
+  await Deno.readTextFile(
+    new URL("./fixtures/valid-english-lecture.json", import.meta.url),
+  ),
+);
+
+function englishInputs() {
+  const input = inputs();
+  return {
+    ...input,
+    schema_version: "2.0",
+    run_id: englishFixture.run_id,
+    lecture: structuredClone(englishFixture.lecture),
+    segments: englishFixture.segments.map((
+      { idx, start_sec, end_sec, text }: {
+        idx: number;
+        start_sec: number;
+        end_sec: number;
+        text: string;
+      },
+    ) => ({ idx, start_sec, end_sec, text })),
+    translations: englishFixture.segments.map((
+      { idx, translation_ko }: { idx: number; translation_ko: string },
+    ) => ({ segment_idx: idx, translation_ko })),
+    outline: {
+      chapters: englishFixture.outline.chapters.map((
+        chapter: Record<string, unknown>,
+      ) => ({
+        ...chapter,
+        children: (chapter.children as Record<string, unknown>[]).map((
+          child,
+        ) => ({ ...child })),
+      })),
+    },
+    summary_note: structuredClone(englishFixture.summary_note),
+    glossary: structuredClone(englishFixture.glossary),
+  };
+}
+
+function assembleEnglish(input: ReturnType<typeof englishInputs>) {
+  const fn =
+    (assembly as unknown as Record<string, unknown>).assembleEnglishLecture;
+  if (typeof fn !== "function") throw new Error("English assembler is missing");
+  return fn(input) as typeof englishFixture;
+}
+
+Deno.test("test_translation_coverage", () => {
+  for (
+    const mutate of [
+      (input: ReturnType<typeof englishInputs>) => input.translations.pop(),
+      (input: ReturnType<typeof englishInputs>) =>
+        input.translations.push({ ...input.translations[0] }),
+      (input: ReturnType<typeof englishInputs>) =>
+        input.translations[0].segment_idx = 99,
+      (input: ReturnType<typeof englishInputs>) =>
+        input.translations[0].translation_ko = "   ",
+    ]
+  ) {
+    const input = englishInputs();
+    mutate(input);
+    try {
+      assembleEnglish(input);
+      throw new Error("Invalid translation coverage was accepted");
+    } catch (error) {
+      if (
+        !(error instanceof Error) || !error.message.includes("/translations")
+      ) throw error;
+    }
+  }
+});
+
+Deno.test("test_english_assembly_preserves_times_and_corrects", () => {
+  const input = englishInputs();
+  input.corrections.push({
+    segment_idx: 2,
+    from: "index",
+    to: "array index",
+    evidence_segment_idxs: [1, 2],
+    reason: "The neighboring array example confirms the intended term.",
+  });
+  const document = assembleEnglish(input);
+  if (
+    document.schema_version !== "2.0" ||
+    document.segments[1].text !==
+      "We use an array index to access an array element."
+  ) throw new Error("English correction was not applied");
+  if (
+    document.segments[1].translation_ko !==
+      englishFixture.segments[1].translation_ko ||
+    document.segments[1].start_sec !== 15
+  ) throw new Error("Translation or time changed");
+  if (
+    document.outline.chapters[0].children[1].start_sec !== 30 ||
+    document.summary_note.key_points[1].start_sec !== 30 ||
+    document.glossary[0].start_sec !== 15
+  ) throw new Error("Reference time changed");
+  if (input.segments[1].text !== englishFixture.segments[1].text) {
+    throw new Error("Raw English captions mutated");
   }
 });

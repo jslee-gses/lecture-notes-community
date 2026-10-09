@@ -1,7 +1,9 @@
 import {
+  assembleEnglishLecture,
   assembleLecture,
   type AssemblyInputs,
   type Correction,
+  type EnglishAssemblyInputs,
 } from "./assemble.ts";
 import { fetchCaption, parseJson3 } from "./captions.ts";
 import { type Chunk, chunkSegments } from "./chunk.ts";
@@ -267,11 +269,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 export async function assembleRun(runDir: string): Promise<LectureDocument> {
   const source = sourceFrom(await readJson(path(runDir, "source.json")));
-  if (source.schema_version !== "1.0") {
-    throw new Error(
-      "/source/schema_version: English assembly is not yet available",
-    );
-  }
   const segments = await readJson(path(runDir, "segments.json")) as Segment[];
   const chunks = await preparedChunks(runDir, segments);
 
@@ -317,7 +314,7 @@ export async function assembleRun(runDir: string): Promise<LectureDocument> {
       corrections.push(edit as unknown as Correction);
     }
   }
-  const inputs: AssemblyInputs = {
+  const inputs = {
     ...source,
     segments,
     corrections,
@@ -331,7 +328,49 @@ export async function assembleRun(runDir: string): Promise<LectureDocument> {
       path(runDir, "glossary.json"),
     ) as AssemblyInputs["glossary"],
   };
-  const lecture = assembleLecture(inputs);
+  let lecture: LectureDocument;
+  if (source.schema_version === "2.0") {
+    const translations: EnglishAssemblyInputs["translations"] = [];
+    for (const chunk of chunks) {
+      const file = path(runDir, `translations/${chunk.chunk_idx}.json`);
+      const part = await readJson(file);
+      if (!Array.isArray(part)) {
+        throw new Error(`${file}: expected a translation array`);
+      }
+      const expected = new Set(chunk.editable.map((segment) => segment.idx));
+      const found = new Set<number>();
+      for (const [i, entry] of part.entries()) {
+        if (
+          !isObject(entry) || !Number.isInteger(entry.segment_idx) ||
+          !expected.has(entry.segment_idx as number) ||
+          found.has(entry.segment_idx as number)
+        ) {
+          throw new Error(
+            `${file}/${i}/segment_idx: translation outside editable range or duplicate`,
+          );
+        }
+        found.add(entry.segment_idx as number);
+        translations.push(
+          entry as unknown as EnglishAssemblyInputs["translations"][number],
+        );
+      }
+      if (found.size !== expected.size) {
+        throw new Error(`${file}: missing translations for editable segments`);
+      }
+    }
+    lecture = assembleEnglishLecture({
+      ...inputs,
+      schema_version: "2.0",
+      lecture: source.lecture,
+      translations,
+    });
+  } else {
+    lecture = assembleLecture({
+      ...inputs,
+      schema_version: "1.0",
+      lecture: source.lecture,
+    });
+  }
   await writeOnce(path(runDir, "lecture.json"), lecture);
   return lecture;
 }

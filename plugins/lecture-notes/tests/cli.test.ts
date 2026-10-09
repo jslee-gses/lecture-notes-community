@@ -1,4 +1,5 @@
 import { assembleRun, fetchRun, prepareRun } from "../scripts/cli.ts";
+import { chunkSegments } from "../scripts/chunk.ts";
 import type { LectureDocument } from "../scripts/types.ts";
 
 const fixture = JSON.parse(
@@ -361,6 +362,209 @@ Deno.test("test_mismatched_resume_source", async () => {
           !(error instanceof Error) || !error.message.includes("run directory")
         ) throw error;
       }
+    }
+  } finally {
+    await Deno.remove(runDir, { recursive: true });
+  }
+});
+
+const englishFixture = JSON.parse(
+  await Deno.readTextFile(
+    new URL("./fixtures/valid-english-lecture.json", import.meta.url),
+  ),
+);
+
+async function stageEnglishAssembly(runDir: string) {
+  const segments = englishFixture.segments.map((
+    { idx, start_sec, end_sec, text }: {
+      idx: number;
+      start_sec: number;
+      end_sec: number;
+      text: string;
+    },
+  ) => ({ idx, start_sec, end_sec, text }));
+  const chunks = chunkSegments(segments);
+  await Deno.writeTextFile(
+    `${runDir}/source.json`,
+    JSON.stringify({
+      schema_version: "2.0",
+      run_id: englishFixture.run_id,
+      lecture: englishFixture.lecture,
+      caption_format: "json3",
+      caption_tag: "en-US",
+      caption_file: `${englishFixture.lecture.video_id}.en-US.json3`,
+    }),
+  );
+  await Deno.writeTextFile(`${runDir}/segments.json`, JSON.stringify(segments));
+  await Deno.mkdir(`${runDir}/chunks`);
+  for (const chunk of chunks) {
+    await Deno.writeTextFile(
+      `${runDir}/chunks/${chunk.chunk_idx}.json`,
+      JSON.stringify(chunk),
+    );
+  }
+  const stripRange = (range: Record<string, unknown>) => ({
+    title: range.title,
+    summary: range.summary,
+    start_idx: range.start_idx,
+    end_idx: range.end_idx,
+  });
+  await Deno.writeTextFile(
+    `${runDir}/outline.json`,
+    JSON.stringify({
+      chapters: englishFixture.outline.chapters.map((
+        chapter: Record<string, unknown>,
+      ) => ({
+        ...stripRange(chapter),
+        children: (chapter.children as Record<string, unknown>[]).map(
+          stripRange,
+        ),
+      })),
+    }),
+  );
+  await Deno.writeTextFile(
+    `${runDir}/summary_note.json`,
+    JSON.stringify({
+      overview: englishFixture.summary_note.overview,
+      key_points: englishFixture.summary_note.key_points.map((
+        point: Record<string, unknown>,
+      ) => ({ text: point.text, segment_idxs: point.segment_idxs })),
+    }),
+  );
+  await Deno.writeTextFile(
+    `${runDir}/glossary.json`,
+    JSON.stringify(
+      englishFixture.glossary.map((term: Record<string, unknown>) => ({
+        term: term.term,
+        explanation: term.explanation,
+        first_segment_idx: term.first_segment_idx,
+      })),
+    ),
+  );
+  return chunks;
+}
+
+Deno.test("test_english_assembly_requires_context_then_translations", async () => {
+  const runDir = await Deno.makeTempDir();
+  try {
+    const chunks = await stageEnglishAssembly(runDir);
+    try {
+      await assembleRun(runDir);
+      throw new Error("English assembly skipped context");
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("context")) {
+        throw error;
+      }
+    }
+    await Deno.mkdir(`${runDir}/context/parts`, { recursive: true });
+    await Deno.mkdir(`${runDir}/corrections`);
+    for (const chunk of chunks) {
+      await Deno.writeTextFile(
+        `${runDir}/context/parts/${chunk.chunk_idx}.json`,
+        JSON.stringify({
+          chunk_idx: chunk.chunk_idx,
+          start_idx: chunk.start_idx,
+          end_idx: chunk.end_idx,
+          flow: "Arrays and linked lists",
+          terms: [],
+          possible_misrecognitions: [],
+        }),
+      );
+      await Deno.writeTextFile(
+        `${runDir}/corrections/${chunk.chunk_idx}.json`,
+        "[]",
+      );
+    }
+    await Deno.writeTextFile(
+      `${runDir}/context/lecture.json`,
+      JSON.stringify({
+        covered_chunk_idxs: chunks.map((chunk) => chunk.chunk_idx),
+        lecture_flow: "Compare data structures",
+        recurring_terms: [],
+        possible_misrecognitions: [],
+      }),
+    );
+    try {
+      await assembleRun(runDir);
+      throw new Error("English assembly skipped translations");
+    } catch (error) {
+      if (
+        !(error instanceof Error) || !error.message.includes("translations")
+      ) throw error;
+    }
+    await Deno.mkdir(`${runDir}/translations`);
+    await Deno.writeTextFile(
+      `${runDir}/translations/1.json`,
+      JSON.stringify(
+        englishFixture.segments.map((
+          segment: { idx: number; translation_ko: string },
+        ) => ({
+          segment_idx: segment.idx,
+          translation_ko: segment.translation_ko,
+        })),
+      ),
+    );
+    const document = await assembleRun(runDir);
+    await assembleRun(runDir);
+    if (
+      document.schema_version !== "2.0" || document.segments.length !== 4 ||
+      !("translation_ko" in document.segments[0])
+    ) throw new Error("English lecture was not assembled");
+    if (
+      JSON.stringify(
+        await JSON.parse(await Deno.readTextFile(`${runDir}/lecture.json`)),
+      ) !== JSON.stringify(document)
+    ) throw new Error("English lecture changed on resume");
+  } finally {
+    await Deno.remove(runDir, { recursive: true });
+  }
+});
+
+Deno.test("test_translation_outside_editable_chunk", async () => {
+  const runDir = await Deno.makeTempDir();
+  try {
+    const chunks = await stageEnglishAssembly(runDir);
+    await Deno.mkdir(`${runDir}/context/parts`, { recursive: true });
+    await Deno.mkdir(`${runDir}/corrections`);
+    await Deno.mkdir(`${runDir}/translations`);
+    for (const chunk of chunks) {
+      await Deno.writeTextFile(
+        `${runDir}/context/parts/${chunk.chunk_idx}.json`,
+        JSON.stringify({
+          chunk_idx: chunk.chunk_idx,
+          start_idx: chunk.start_idx,
+          end_idx: chunk.end_idx,
+          flow: "Arrays",
+          terms: [],
+          possible_misrecognitions: [],
+        }),
+      );
+      await Deno.writeTextFile(
+        `${runDir}/corrections/${chunk.chunk_idx}.json`,
+        "[]",
+      );
+    }
+    await Deno.writeTextFile(
+      `${runDir}/context/lecture.json`,
+      JSON.stringify({
+        covered_chunk_idxs: [1],
+        lecture_flow: "Data structures",
+        recurring_terms: [],
+        possible_misrecognitions: [],
+      }),
+    );
+    await Deno.writeTextFile(
+      `${runDir}/translations/1.json`,
+      JSON.stringify([{ segment_idx: 99, translation_ko: "오류" }]),
+    );
+    try {
+      await assembleRun(runDir);
+      throw new Error("Out-of-chunk translation was accepted");
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !error.message.includes("translations/1.json")
+      ) throw error;
     }
   } finally {
     await Deno.remove(runDir, { recursive: true });
