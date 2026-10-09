@@ -90,7 +90,7 @@
 **Interfaces:** `parseJson3(raw: unknown): Segment[]` from `captions.ts` returns 1-based ordered segments in seconds, preserving spoken meaning while removing empty caption events and exact overlap duplicates. `chunkSegments(segments: Segment[], maxChars: number, contextSegments: number): Chunk[]` returns disjoint editable ranges plus read-only neighbor context; default `maxChars=12000`, `contextSegments=3`.
 
 - [ ] **Step 1: Write failing parser/chunk tests.** `test_empty_event` asserts it is skipped, `test_malformed_event` asserts a caption error, `test_overlap` asserts monotonic time and 1-based indices, and `test_three_hour_chunks` asserts every index appears in exactly one editable range and each chunk stays at or below 12,000 characters.
-- [ ] **Step 2: Run `deno test --config plugins/lecture-notes/deno.json plugins/lecture-notes/tests/captions.test.ts plugins/lecture-notes/tests/chunk.test.ts` red.**
+- [ ] **Step 2: Run `deno test --allow-read --config plugins/lecture-notes/deno.json plugins/lecture-notes/tests/captions.test.ts plugins/lecture-notes/tests/chunk.test.ts` red.**
 - [ ] **Step 3: Implement `parseJson3` and `chunkSegments`** with time and coverage checks; Task 5's CLI writes their results to `segments.json` and per-chunk context files.
 - [ ] **Step 4: Run tests green** and inspect one boundary file for the editable versus context range.
 - [ ] **Step 5: Commit:** `feat: normalize and chunk lecture captions`.
