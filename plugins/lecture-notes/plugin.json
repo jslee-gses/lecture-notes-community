@@ -1,14 +1,14 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "lecture-notes",
-  "version": "0.2.0",
-  "description": "Turn Korean YouTube lectures into grounded, timestamped notes on a public catalog.",
+  "version": "0.3.0",
+  "description": "Turn Korean and English YouTube lectures into grounded, timestamped Korean notes on a public catalog.",
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Lecture Notes",
-        "shortDescription": "Korean lecture outlines, notes, and glossary",
-        "longDescription": "Create a timestamped outline, lecture-wide notes, and glossary from Korean YouTube auto-captions, then show the result in a public catalog.",
+        "shortDescription": "Korean notes from Korean or English lectures",
+        "longDescription": "Create a timestamped outline, lecture-wide Korean notes, and glossary from original Korean or English YouTube captions, with aligned Korean translations for English lectures.",
         "developerName": "Lecture Notes Community",
         "category": "Productivity",
         "defaultPrompt": [

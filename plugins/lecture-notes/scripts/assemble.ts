@@ -1,5 +1,6 @@
 import {
-  type LectureDocument,
+  type EnglishLectureDocument,
+  type KoreanLectureDocument,
   type Segment,
   validateLecture,
 } from "./types.ts";
@@ -22,7 +23,7 @@ interface SourceRange {
 export interface AssemblyInputs {
   schema_version: "1.0";
   run_id: string;
-  lecture: LectureDocument["lecture"];
+  lecture: KoreanLectureDocument["lecture"];
   segments: Segment[];
   corrections: Correction[];
   outline: {
@@ -39,6 +40,13 @@ export interface AssemblyInputs {
   }[];
 }
 
+export interface EnglishAssemblyInputs
+  extends Omit<AssemblyInputs, "schema_version" | "lecture"> {
+  schema_version: "2.0";
+  lecture: EnglishLectureDocument["lecture"];
+  translations: { segment_idx: number; translation_ko: string }[];
+}
+
 function fail(path: string, message: string): never {
   throw new Error(`${path}: ${message}`);
 }
@@ -50,7 +58,7 @@ function segmentAt(segments: Segment[], idx: number, path: string): Segment {
   return segments[idx - 1];
 }
 
-export function assembleLecture(inputs: AssemblyInputs): LectureDocument {
+export function assembleLecture(inputs: AssemblyInputs): KoreanLectureDocument {
   if (inputs.schema_version !== "1.0") {
     fail("/schema_version", "unsupported version");
   }
@@ -188,5 +196,62 @@ export function assembleLecture(inputs: AssemblyInputs): LectureDocument {
       key_points: keyPoints,
     },
     glossary,
+  }) as KoreanLectureDocument;
+}
+
+export function assembleEnglishLecture(
+  inputs: EnglishAssemblyInputs,
+): EnglishLectureDocument {
+  if (inputs.schema_version !== "2.0") {
+    fail("/schema_version", "unsupported version");
+  }
+  if (!Array.isArray(inputs.translations)) {
+    fail("/translations", "expected an array");
+  }
+  const translations = new Map<number, string>();
+  for (const [i, entry] of inputs.translations.entries()) {
+    if (
+      !entry || !Number.isInteger(entry.segment_idx) ||
+      entry.segment_idx < 1 || entry.segment_idx > inputs.segments.length
+    ) fail(`/translations/${i}/segment_idx`, "out of range");
+    if (translations.has(entry.segment_idx)) {
+      fail(`/translations/${i}/segment_idx`, "duplicate translation");
+    }
+    if (
+      typeof entry.translation_ko !== "string" ||
+      !entry.translation_ko.trim()
+    ) {
+      fail(
+        `/translations/${i}/translation_ko`,
+        "nonempty translation required",
+      );
+    }
+    translations.set(entry.segment_idx, entry.translation_ko.trim());
+  }
+  if (translations.size !== inputs.segments.length) {
+    fail(
+      "/translations",
+      "exactly one translation per source segment required",
+    );
+  }
+  const { translation_language: _translationLanguage, ...commonLecture } =
+    inputs.lecture;
+  const base = assembleLecture({
+    ...inputs,
+    schema_version: "1.0",
+    lecture: {
+      ...commonLecture,
+      caption_language: "ko",
+      caption_source: "auto",
+    },
   });
+  return validateLecture({
+    ...base,
+    schema_version: "2.0",
+    lecture: inputs.lecture,
+    segments: base.segments.map((segment) => ({
+      ...segment,
+      translation_ko: translations.get(segment.idx),
+    })),
+  }) as EnglishLectureDocument;
 }

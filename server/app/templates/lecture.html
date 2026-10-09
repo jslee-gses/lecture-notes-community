@@ -26,7 +26,7 @@
         <div class="search-bar"><label for="transcript-search">전사 검색</label><input id="transcript-search" data-testid="transcript-search" type="search" placeholder="전사에서 검색" autocomplete="off"></div>
         <div class="transcript-list" tabindex="0" aria-label="시간순 전사">
           {% for segment in document.segments %}
-          <div class="transcript-row" data-transcript-row><button type="button" class="transcript-time seek-button" data-seek="{{ segment.start_sec }}" aria-label="{{ timestamp(segment.start_sec) }}부터 재생">{{ timestamp(segment.start_sec) }}</button><p>{{ segment.text }}</p></div>
+          <div class="transcript-row" data-transcript-row><button type="button" class="transcript-time seek-button" data-seek="{{ segment.start_sec }}" aria-label="{{ timestamp(segment.start_sec) }}부터 재생">{{ timestamp(segment.start_sec) }}</button><div class="transcript-copy"><p lang="{{ document.lecture.caption_language }}">{{ segment.text }}</p>{% if document.schema_version == '2.0' %}<p lang="ko" class="transcript-translation">{{ segment.translation_ko }}</p>{% endif %}</div></div>
           {% endfor %}
         </div>
         <p id="search-empty" class="search-empty" hidden>검색 결과가 없습니다.</p>

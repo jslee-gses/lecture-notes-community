@@ -1,19 +1,46 @@
 import {
+  assembleEnglishLecture,
   assembleLecture,
   type AssemblyInputs,
   type Correction,
+  type EnglishAssemblyInputs,
 } from "./assemble.ts";
-import { fetchCaption, parseJson3 } from "./captions.ts";
+import {
+  type CaptionTrack,
+  fetchCaption,
+  parseJson3,
+  selectCaptionTrack,
+} from "./captions.ts";
 import { type Chunk, chunkSegments } from "./chunk.ts";
-import type { LectureDocument, Segment } from "./types.ts";
+import type {
+  EnglishLectureDocument,
+  KoreanLectureDocument,
+  LectureDocument,
+  Segment,
+} from "./types.ts";
 import { parseVideoId } from "./url.ts";
 import { uploadLecture, type UploadResult } from "./upload.ts";
+import { parseVtt } from "./vtt.ts";
 
-interface Source {
+interface KoreanSource {
   schema_version: "1.0";
   run_id: string;
-  lecture: LectureDocument["lecture"];
+  lecture: KoreanLectureDocument["lecture"];
+  caption_format?: "json3" | "vtt";
+  caption_tag?: string;
+  caption_file?: string;
 }
+
+interface EnglishSource {
+  schema_version: "2.0";
+  run_id: string;
+  lecture: EnglishLectureDocument["lecture"];
+  caption_format: "json3" | "vtt";
+  caption_tag: string;
+  caption_file: string;
+}
+
+type Source = KoreanSource | EnglishSource;
 
 function path(base: string, relative: string): string {
   return `${base}/${relative}`;
@@ -53,11 +80,23 @@ function sourceFrom(value: unknown): Source {
     throw new Error("/source: expected an object");
   }
   const source = value as Source;
-  if (source.schema_version !== "1.0") {
+  if (source.schema_version !== "1.0" && source.schema_version !== "2.0") {
     throw new Error("/source/schema_version: unsupported version");
   }
   if (!source.lecture || typeof source.lecture.video_id !== "string") {
     throw new Error("/source/lecture/video_id: missing video ID");
+  }
+  if (source.schema_version === "2.0") {
+    if (
+      source.lecture.caption_language !== "en" ||
+      !["manual", "auto"].includes(source.lecture.caption_source) ||
+      source.lecture.translation_language !== "ko" ||
+      !["json3", "vtt"].includes(source.caption_format) ||
+      typeof source.caption_tag !== "string" ||
+      !/^en(?:-[A-Za-z0-9_-]+)?$/u.test(source.caption_tag) ||
+      source.caption_file !==
+        `${source.lecture.video_id}.${source.caption_tag}.${source.caption_format}`
+    ) throw new Error("/source: invalid English caption manifest");
   }
   return source;
 }
@@ -80,9 +119,9 @@ export async function fetchRun(
   url: string,
   runDir: string,
   workspace: string,
+  requestedLanguage: "ko" | "en" | "auto" = "auto",
 ): Promise<Source> {
   const videoId = parseVideoId(url);
-  const captionPath = path(runDir, `${videoId}.ko.json3`);
   const infoPath = path(runDir, `${videoId}.info.json`);
   const sourcePath = path(runDir, "source.json");
   const sourceStat = await Deno.stat(sourcePath).catch((error) => {
@@ -97,17 +136,64 @@ export async function fetchRun(
       "/source/lecture/video_id: run directory belongs to another video",
     );
   }
-  const caption = await Deno.stat(captionPath).catch(() => null);
+  if (
+    existing && requestedLanguage !== "auto" &&
+    existing.lecture.caption_language !== requestedLanguage
+  ) {
+    throw new Error(
+      "/source/lecture/caption_language: run directory belongs to another language",
+    );
+  }
   const info = await Deno.stat(infoPath).catch(() => null);
+  let recoveredTrack: CaptionTrack | undefined;
+  if (!existing && info?.isFile && info.size > 0) {
+    const savedMetadata = await readJson(infoPath);
+    if (!isObject(savedMetadata) || savedMetadata.id !== videoId) {
+      throw new Error(`${infoPath}: metadata ID does not match URL`);
+    }
+    const legacyCaption = await Deno.stat(path(runDir, `${videoId}.ko.json3`))
+      .catch(() => null);
+    const noNativeLanguage = !savedMetadata.language &&
+      !savedMetadata.original_language;
+    const noTrackInventory = !savedMetadata.subtitles &&
+      !savedMetadata.automatic_captions;
+    // Older Korean runs saved the selected auto subtitle before their manifest.
+    if (
+      requestedLanguage !== "en" && noNativeLanguage && noTrackInventory &&
+      legacyCaption?.isFile && legacyCaption.size > 0
+    ) {
+      recoveredTrack = {
+        language: "ko",
+        source: "auto",
+        format: "json3",
+        tag: "ko",
+      };
+    } else {
+      recoveredTrack = selectCaptionTrack(savedMetadata, requestedLanguage);
+    }
+  }
+  const captionName = existing?.caption_file ??
+    (recoveredTrack
+      ? `${videoId}.${recoveredTrack.tag}.${recoveredTrack.format}`
+      : `${videoId}.ko.json3`);
+  const captionPath = path(runDir, captionName);
+  const caption = await Deno.stat(captionPath).catch(() => null);
+  let fetched: Awaited<ReturnType<typeof fetchCaption>> | undefined;
   if (!caption && !info) {
     if (existing) {
       throw new Error("/source: manifest exists but caption files are missing");
     }
     const tools = await doctor(workspace);
-    await fetchCaption(videoId, runDir, {
-      deno: tools.deno,
-      ytdlp: tools.ytdlp,
-    });
+    fetched = await fetchCaption(
+      videoId,
+      runDir,
+      {
+        deno: tools.deno,
+        ytdlp: tools.ytdlp,
+      },
+      undefined,
+      requestedLanguage,
+    );
   } else if (!caption?.isFile || !info?.isFile || !caption.size || !info.size) {
     throw new Error(
       "/source: partial caption fetch; keep files for inspection and retry in a new run directory",
@@ -130,29 +216,51 @@ export async function fetchRun(
     (existing.lecture.title !== metadata.title ||
       existing.lecture.duration_sec !== metadata.duration)
   ) throw new Error(`${infoPath}: metadata differs from the saved run`);
-  const source: Source = existing ?? {
-    schema_version: "1.0",
-    run_id: crypto.randomUUID(),
-    lecture: {
-      video_id: videoId,
-      url: `https://www.youtube.com/watch?v=${videoId}`,
-      title: metadata.title,
-      duration_sec: metadata.duration,
-      caption_language: "ko",
-      caption_source: "auto",
-      created_at: new Date().toISOString(),
-    },
+  const shared = {
+    video_id: videoId,
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    title: metadata.title as string,
+    duration_sec: metadata.duration as number,
+    created_at: new Date().toISOString(),
   };
+  const selectedTrack = fetched?.track ?? recoveredTrack;
+  const source: Source = existing ?? (selectedTrack?.language === "en"
+    ? {
+      schema_version: "2.0",
+      run_id: crypto.randomUUID(),
+      lecture: {
+        ...shared,
+        caption_language: "en",
+        caption_source: selectedTrack.source,
+        translation_language: "ko",
+      },
+      caption_format: selectedTrack.format,
+      caption_tag: selectedTrack.tag,
+      caption_file: `${videoId}.${selectedTrack.tag}.${selectedTrack.format}`,
+    }
+    : {
+      schema_version: "1.0",
+      run_id: crypto.randomUUID(),
+      lecture: { ...shared, caption_language: "ko", caption_source: "auto" },
+      caption_format: selectedTrack?.format,
+      caption_tag: selectedTrack?.tag,
+      caption_file: selectedTrack
+        ? `${videoId}.${selectedTrack.tag}.${selectedTrack.format}`
+        : undefined,
+    });
   await writeOnce(path(runDir, "source.json"), source);
   return source;
 }
 
 export async function prepareRun(runDir: string): Promise<Chunk[]> {
   const source = sourceFrom(await readJson(path(runDir, "source.json")));
-  const raw = await readJson(
-    path(runDir, `${source.lecture.video_id}.ko.json3`),
+  const captionPath = path(
+    runDir,
+    source.caption_file ?? `${source.lecture.video_id}.ko.json3`,
   );
-  const segments = parseJson3(raw);
+  const segments = source.caption_format === "vtt"
+    ? parseVtt(await Deno.readTextFile(captionPath))
+    : parseJson3(await readJson(captionPath));
   const duration = source.lecture.duration_sec;
   if (segments.at(-1)!.end_sec > duration) {
     const tail = segments.at(-1)!;
@@ -242,7 +350,7 @@ export async function assembleRun(runDir: string): Promise<LectureDocument> {
       corrections.push(edit as unknown as Correction);
     }
   }
-  const inputs: AssemblyInputs = {
+  const inputs = {
     ...source,
     segments,
     corrections,
@@ -256,7 +364,49 @@ export async function assembleRun(runDir: string): Promise<LectureDocument> {
       path(runDir, "glossary.json"),
     ) as AssemblyInputs["glossary"],
   };
-  const lecture = assembleLecture(inputs);
+  let lecture: LectureDocument;
+  if (source.schema_version === "2.0") {
+    const translations: EnglishAssemblyInputs["translations"] = [];
+    for (const chunk of chunks) {
+      const file = path(runDir, `translations/${chunk.chunk_idx}.json`);
+      const part = await readJson(file);
+      if (!Array.isArray(part)) {
+        throw new Error(`${file}: expected a translation array`);
+      }
+      const expected = new Set(chunk.editable.map((segment) => segment.idx));
+      const found = new Set<number>();
+      for (const [i, entry] of part.entries()) {
+        if (
+          !isObject(entry) || !Number.isInteger(entry.segment_idx) ||
+          !expected.has(entry.segment_idx as number) ||
+          found.has(entry.segment_idx as number)
+        ) {
+          throw new Error(
+            `${file}/${i}/segment_idx: translation outside editable range or duplicate`,
+          );
+        }
+        found.add(entry.segment_idx as number);
+        translations.push(
+          entry as unknown as EnglishAssemblyInputs["translations"][number],
+        );
+      }
+      if (found.size !== expected.size) {
+        throw new Error(`${file}: missing translations for editable segments`);
+      }
+    }
+    lecture = assembleEnglishLecture({
+      ...inputs,
+      schema_version: "2.0",
+      lecture: source.lecture,
+      translations,
+    });
+  } else {
+    lecture = assembleLecture({
+      ...inputs,
+      schema_version: "1.0",
+      lecture: source.lecture,
+    });
+  }
   await writeOnce(path(runDir, "lecture.json"), lecture);
   return lecture;
 }
@@ -287,8 +437,18 @@ if (import.meta.main) {
     let result: unknown;
     if (command === "doctor" && args.length === 1) {
       result = await doctor(args[0]);
-    } else if (command === "fetch" && args.length === 3) {
-      result = await fetchRun(args[0], args[1], args[2]);
+    } else if (
+      command === "fetch" && (args.length === 3 || args.length === 4)
+    ) {
+      if (args[3] && !["ko", "en", "auto"].includes(args[3])) {
+        throw new Error("fetch language must be ko, en or auto");
+      }
+      result = await fetchRun(
+        args[0],
+        args[1],
+        args[2],
+        args[3] as "ko" | "en" | "auto" | undefined,
+      );
     } else if (command === "prepare" && args.length === 1) {
       result = { chunks: (await prepareRun(args[0])).length };
     } else if (command === "assemble" && args.length === 1) {
@@ -300,7 +460,7 @@ if (import.meta.main) {
       result = await uploadRun(args[0], args[1]);
     } else {
       throw new Error(
-        "Usage: cli.ts doctor <workspace> | fetch <url> <run-dir> <workspace> | prepare <run-dir> | assemble <run-dir> | upload <run-dir> [server-url]",
+        "Usage: cli.ts doctor <workspace> | fetch <url> <run-dir> <workspace> [ko|en|auto] | prepare <run-dir> | assemble <run-dir> | upload <run-dir> [server-url]",
       );
     }
     console.log(JSON.stringify(result));

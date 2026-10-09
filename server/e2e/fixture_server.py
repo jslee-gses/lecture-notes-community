@@ -27,6 +27,10 @@ long_document["summary_note"]["key_points"] = [
     for number in range(60)
 ]
 long_saved = repository.insert_or_get(long_document, "e2e-client")
+english_fixture = Path(__file__).resolve().parents[2] / "plugins" / "lecture-notes" / "tests" / "fixtures" / "valid-english-lecture.json"
+english_document = json.loads(english_fixture.read_text(encoding="utf-8"))
+english_document["segments"][0]["text"] += " <script>window.__injected=true</script>"
+english_saved = repository.insert_or_get(english_document, "e2e-client")
 app = create_app(Settings(public_base_url="http://127.0.0.1:8765", ip_hash_secret=b"e2e"), repository, clock=lambda: now)
 
 
@@ -38,3 +42,8 @@ def fixture_redirect():
 @app.get("/fixture-long")
 def long_fixture_redirect():
     return RedirectResponse(f"/api/lectures/{long_saved.share_token}")
+
+
+@app.get("/fixture-en")
+def english_fixture_redirect():
+    return RedirectResponse(f"/api/lectures/{english_saved.share_token}")

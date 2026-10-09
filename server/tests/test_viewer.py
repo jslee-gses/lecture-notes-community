@@ -11,6 +11,7 @@ from server.app.rate_limit import QuotaLimits
 
 
 FIXTURE = Path(__file__).resolve().parents[2] / "plugins" / "lecture-notes" / "tests" / "fixtures" / "valid-lecture.json"
+ENGLISH_FIXTURE = Path(__file__).resolve().parents[2] / "plugins" / "lecture-notes" / "tests" / "fixtures" / "valid-english-lecture.json"
 
 
 def service(document=None):
@@ -57,6 +58,20 @@ def test_escaped_segment():
     html = client.get(f"/api/lectures/{saved.share_token}").text
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+def test_english_share_page_displays_both_languages_safely():
+    document = json.loads(ENGLISH_FIXTURE.read_text(encoding="utf-8"))
+    document["segments"][0]["text"] += " <script>alert(1)</script>"
+    document["segments"][0]["translation_ko"] += " <script>alert(2)</script>"
+    client, saved = service(document)
+    html = client.get(f"/api/lectures/{saved.share_token}").text
+    assert "An array stores data" in html
+    assert "배열은 연속된 데이터를 저장합니다." in html
+    assert "<script>alert(1)</script>" not in html
+    assert "<script>alert(2)</script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "&lt;script&gt;alert(2)&lt;/script&gt;" in html
 
 
 def test_no_listing():

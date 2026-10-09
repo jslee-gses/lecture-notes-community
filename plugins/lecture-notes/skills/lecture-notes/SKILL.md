@@ -1,18 +1,18 @@
 ---
 name: lecture-notes
-description: Use when a Codex user supplies a Korean YouTube lecture URL and asks for a timestamped outline, overall notes, glossary, or a shareable lecture result.
+description: Use when a Codex user supplies a Korean or English YouTube lecture URL and asks for a timestamped outline, Korean notes, glossary, bilingual captions, or a shareable lecture result.
 ---
 
 # Lecture Notes
 
-Turn one Korean YouTube lecture (up to 3 hours) into a grounded `lecture.json` and a public catalog entry. The scripts fetch, validate, and upload data; you do the contextual reading and writing. Tell the user before uploading that the new lecture's title and contents will be visible to every catalog visitor for 90 days.
+Turn one Korean or English YouTube lecture (up to 3 hours) into a grounded `lecture.json` and a public catalog entry. For English lectures, preserve the English captions and translate every segment into Korean; write the outline, summary and glossary in Korean. The scripts fetch, validate, and upload data; you do the contextual reading and writing. Tell the user before uploading that the new lecture's title and contents will be visible to every catalog visitor for 90 days.
 
 ## Prepare the run
 
 1. Identify the installed plugin root as two directories above this `SKILL.md`. Use the user's current project as the workspace. Put a new run in `<workspace>/.lecture-notes/runs/<unique-id>`. Reuse that same directory when retrying a failed stage.
 2. In PowerShell, run `<plugin-root>/tools/bootstrap.ps1 -WorkspacePath <workspace>` and parse its JSON output for `deno` and `ytdlp`. This downloads only pinned, checksum-verified portable tools into the workspace cache. Run the returned `deno.exe`; never use a different `yt-dlp` binary.
-3. Run `deno run --allow-read --allow-write --allow-run --allow-net --config <plugin-root>/deno.json <plugin-root>/scripts/cli.ts doctor <workspace>`, then `fetch <youtube-url> <run-dir> <workspace>`, then `prepare <run-dir>` with the same Deno command prefix. Network permission is needed for the later HTTPS upload. A missing Korean auto-caption or invalid URL stops the job. Do not download video or audio.
-4. Keep `source.json`, the original `*.ko.json3`, `*.info.json`, `segments.json`, and every `chunks/<number>.json`. They are the evidence for retries. Treat each chunk's `editable` array as the only text you may correct there; `context_before` and `context_after` are read-only context.
+3. Run `deno run --allow-read --allow-write --allow-run --allow-net --config <plugin-root>/deno.json <plugin-root>/scripts/cli.ts doctor <workspace>`, then `fetch <youtube-url> <run-dir> <workspace> [ko|en|auto]`, then `prepare <run-dir>` with the same Deno command prefix. Default `auto` uses the video's verified native-language metadata. If it is missing, ask the user whether the lecture is Korean or English and retry with that explicit code; a conflicting native language is an error. English selects original manual captions first, then original auto captions, and stops if neither exists. Korean uses auto captions. Do not use translated YouTube captions or download video or audio.
+4. Keep `source.json`, the original caption file named by `caption_file` (`*.json3` or `*.vtt`), `*.info.json`, `segments.json`, and every `chunks/<number>.json`. They are the evidence for retries. Treat each chunk's `editable` array as the only text you may correct there; `context_before` and `context_after` are read-only context.
 
 ## First pass: understand the whole lecture
 
@@ -26,9 +26,11 @@ Use the actual chunk bounds and actual segment references. The `flow` explains t
 
 After all parts exist, write `context/lecture.json` with `covered_chunk_idxs` listing **every** chunk number in order, `lecture_flow` summarizing the complete arc, `recurring_terms` merging observed spellings and evidence across chunks, and `possible_misrecognitions` containing candidates worth checking. The assembly command requires this complete context and all part files.
 
-## Second pass: conservative correction
+## Second pass: conservative correction and English translation
 
 Revisit each chunk using the whole-lecture brief plus its read-only neighbors. Write `corrections/<number>.json` as an array. Each entry is `{"segment_idx":28,"from":"exact source phrase","to":"replacement phrase","evidence_segment_idxs":[7,28],"reason":"short contextual explanation"}`. Use only segment numbers in that chunk's `editable` range. The `from` phrase must appear exactly once in the original segment. Include attached particles in `from` and `to` when Korean grammar changes. Use valid source segment references; do not turn a contextual guess into a fact. If uncertain, omit the correction and note the uncertainty to the user. Write `[]` when a chunk needs no edits. Never edit `segments.json` directly.
+
+For an English source, after the whole-lecture context is complete, write `translations/<number>.json` for each chunk as `[ {"segment_idx":28,"translation_ko":"..."} ]`. Include every index in that chunk's `editable` range exactly once, with a nonempty Korean translation of the corrected English speech. Keep technical terms consistent with `context/lecture.json`; do not add claims absent from the source. Preserve uncertainty in the Korean wording and report important unresolved caption errors to the user. The assembler rejects missing, duplicate, blank and out-of-chunk translations. Korean runs do not use translation files.
 
 ## Build the outputs
 
@@ -38,8 +40,8 @@ Use the corrected reading to write these files in the run directory:
 - `summary_note.json`: `{"overview":"...","key_points":[{"text":"...","segment_idxs":[12,13]}]}`. Give a lecture-wide overview and substantive key points with actual supporting segments. Avoid claims absent from the transcript.
 - `glossary.json`: `[{"term":"...","explanation":"...","first_segment_idx":12}]`. Explain terms actually used or taught; anchor each at its first relevant explanation. An empty array is valid when no term qualifies.
 
-Run `assemble <run-dir>` with the same Deno command prefix. It applies only exact, nonoverlapping corrections, derives all timestamps from segments, checks the shared JSON contract, and saves `lecture.json`. If validation fails, repair the named intermediate file and retry. Existing valid intermediates are reusable. If a different `lecture.json` already exists for that run ID, preserve it and start a new run rather than changing what an upload retry would send.
+Run `assemble <run-dir>` with the same Deno command prefix. It applies only exact, nonoverlapping corrections, checks one Korean translation per English segment, derives all timestamps from source segments, checks the shared JSON contract, and saves `lecture.json`. If validation fails, repair the named intermediate file and retry. Existing valid intermediates are reusable. If a different `lecture.json` already exists for that run ID, preserve it and start a new run rather than changing what an upload retry would send.
 
 Run `upload <run-dir>` with the same Deno command prefix. The packaged `server.json` supplies the public server URL; no user account or API key is required. Upload only the validated `lecture.json`, never raw captions or video. On a transport or server error, keep every local file and retry `upload` with the same run directory. On HTTP 429, report the retry time; on 409, stop and report the run-ID conflict. Do not silently create a different JSON for the same run ID.
 
-Report the local JSON path, share URL, 90-day expiration date, number of segments and chapters, meaningful uncertainties, and any failed stage. If the upload response contains `listing_url`, report it and confirm public catalog listing. If it does not, report only the share URL and do not claim catalog visibility; an older server may not support public listing. Do not invent missing transcript content or imply that an unverified semantic claim passed human review.
+Report the local JSON path, share URL, 90-day expiration date, caption language and source, number of segments and chapters, meaningful uncertainties, and any failed stage. If the upload response contains `listing_url`, report it and confirm public catalog listing. If it does not, report only the share URL and do not claim catalog visibility; an older server may not support public listing. Do not invent missing transcript content or imply that an unverified semantic claim passed human review.
