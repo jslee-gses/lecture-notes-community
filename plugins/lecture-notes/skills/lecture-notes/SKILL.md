@@ -5,7 +5,7 @@ description: Use when a Codex user supplies a Korean YouTube lecture URL and ask
 
 # Lecture Notes
 
-Turn one Korean YouTube lecture (up to 3 hours) into a grounded `lecture.json` and an unlisted share page. The scripts fetch, validate, and upload data; you do the contextual reading and writing.
+Turn one Korean YouTube lecture (up to 3 hours) into a grounded `lecture.json` and a public catalog entry. The scripts fetch, validate, and upload data; you do the contextual reading and writing. Tell the user before uploading that the new lecture's title and contents will be visible to every catalog visitor for 90 days.
 
 ## Prepare the run
 
@@ -42,4 +42,4 @@ Run `assemble <run-dir>` with the same Deno command prefix. It applies only exac
 
 Run `upload <run-dir>` with the same Deno command prefix. The packaged `server.json` supplies the public server URL; no user account or API key is required. Upload only the validated `lecture.json`, never raw captions or video. On a transport or server error, keep every local file and retry `upload` with the same run directory. On HTTP 429, report the retry time; on 409, stop and report the run-ID conflict. Do not silently create a different JSON for the same run ID.
 
-Report the local JSON path, share URL, 90-day expiration date, number of segments and chapters, meaningful uncertainties, and any failed stage. The share URL is accessible to anyone who has it. Do not invent missing transcript content or imply that an unverified semantic claim passed human review.
+Report the local JSON path, share URL, 90-day expiration date, number of segments and chapters, meaningful uncertainties, and any failed stage. If the upload response contains `listing_url`, report it and confirm public catalog listing. If it does not, report only the share URL and do not claim catalog visibility; an older server may not support public listing. Do not invent missing transcript content or imply that an unverified semantic claim passed human review.
