@@ -73,14 +73,14 @@
 
 ### Task 3: Windows Bootstrap and Caption Fetch
 
-**Files:** Create `plugins/lecture-notes/tools/bootstrap.ps1`, `plugins/lecture-notes/tools.lock.json`, `plugins/lecture-notes/scripts/url.ts`, `plugins/lecture-notes/scripts/captions.ts`, `plugins/lecture-notes/tests/url.test.ts`, `plugins/lecture-notes/tests/fetch.test.ts`.
+**Files:** Create `plugins/lecture-notes/tools/bootstrap.ps1`, `plugins/lecture-notes/tools.lock.json`, `plugins/lecture-notes/scripts/url.ts`, `plugins/lecture-notes/scripts/captions.ts`, `plugins/lecture-notes/tests/url.test.ts`, `plugins/lecture-notes/tests/fetch.test.ts`, `plugins/lecture-notes/tests/bootstrap.test.ps1`.
 
 **Interfaces:** `parseVideoId(url: string): string` accepts YouTube watch and short URLs only. `fetchCaption(videoId: string, workDir: string, toolPaths: {deno: string; ytdlp: string}): Promise<{captionPath: string; infoPath: string}>` writes Korean auto-caption JSON3 and metadata, skips video media, and throws `CaptionUnavailable` if that track cannot be obtained. `bootstrap.ps1` prints resolved absolute tool paths as JSON.
 
 - [ ] **Step 1: Write failing URL and fetch tests.** `test_url_forms` asserts watch and short URLs yield the same 11-character ID; `test_lookalike_host` asserts rejection before invoking the stub; `test_fetch_text_only` asserts only caption/metadata files exist; `test_no_korean_auto_caption` asserts `CaptionUnavailable`.
-- [ ] **Step 2: Run `deno test --config plugins/lecture-notes/deno.json plugins/lecture-notes/tests/url.test.ts plugins/lecture-notes/tests/fetch.test.ts` red.**
+- [ ] **Step 2: Run `deno test --allow-read --allow-write --config plugins/lecture-notes/deno.json plugins/lecture-notes/tests/url.test.ts plugins/lecture-notes/tests/fetch.test.ts` and `plugins/lecture-notes/tests/bootstrap.test.ps1` red.**
 - [ ] **Step 3: Implement URL parsing, yt-dlp invocation, and PowerShell bootstrap.** The bootstrap checks existing tools first, downloads pinned official Windows releases into `workspace/.lecture-notes/tools` when absent, compares SHA-256 from `tools.lock.json`, and never modifies global PATH or requests administrator rights. Pass Deno to yt-dlp's JS runtime option.
-- [ ] **Step 4: Run tests green** and execute a clean Windows bootstrap in a temporary workspace; confirm cache reuse and checksum mismatch refusal.
+- [ ] **Step 4: Run tests green** and execute a clean Windows bootstrap in a temporary workspace; confirm pinned versions, cache reuse, and checksum mismatch refusal.
 - [ ] **Step 5: Commit:** `feat: fetch Korean captions with portable tools`.
 
 ### Task 4: Normalize and Chunk Three-Hour Captions
