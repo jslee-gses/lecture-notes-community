@@ -23,6 +23,7 @@ def test_marketplace_points_to_installable_plugin():
     assert (PLUGIN / "scripts" / "upload.ts").is_file()
     assert (PLUGIN / "schema" / "lecture.schema.json").is_file()
     assert (PLUGIN / "tools" / "bootstrap.ps1").is_file()
+    assert (PLUGIN / "LICENSE").is_file()
     server = json.loads((PLUGIN / "server.json").read_text(encoding="utf-8"))
     assert server["base_url"].startswith("https://")
 
