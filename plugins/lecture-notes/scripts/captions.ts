@@ -3,9 +3,20 @@ const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 import type { Segment } from "./types.ts";
 
 export class CaptionUnavailable extends Error {
-  constructor(videoId: string) {
-    super(`한국어 자동 자막을 찾을 수 없습니다: ${videoId}`);
+  constructor(videoId: string, language: "ko" | "en" = "ko") {
+    super(
+      `${
+        language === "ko" ? "한국어" : "영어"
+      } 원본 자막을 찾을 수 없습니다: ${videoId}`,
+    );
     this.name = "CaptionUnavailable";
+  }
+}
+
+export class CaptionLanguageAmbiguous extends Error {
+  constructor() {
+    super("영상의 원본 언어를 확인할 수 없습니다. ko 또는 en을 명시해 주세요.");
+    this.name = "CaptionLanguageAmbiguous";
   }
 }
 
@@ -123,20 +134,116 @@ export function parseJson3(raw: unknown): Segment[] {
   }));
 }
 
+export interface CaptionTrack {
+  language: "ko" | "en";
+  source: "manual" | "auto";
+  format: "json3" | "vtt";
+  tag: string;
+}
+
+export interface ToolPaths {
+  deno: string;
+  ytdlp: string;
+}
+
+type RequestedLanguage = "ko" | "en" | "auto";
+
+function baseLanguage(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return value.toLowerCase().split(/[-_]/u)[0];
+}
+
+function bestFormat(value: unknown): CaptionTrack["format"] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  for (const ext of ["json3", "vtt"] as const) {
+    if (value.some((entry) => isRecord(entry) && entry.ext === ext)) return ext;
+  }
+  return undefined;
+}
+
+export function selectCaptionTrack(
+  info: unknown,
+  requestedLanguage: RequestedLanguage,
+): CaptionTrack {
+  if (!isRecord(info)) {
+    throw new CaptionFetchError("video metadata is malformed");
+  }
+  const native = [
+    baseLanguage(info.original_language),
+    baseLanguage(info.language),
+  ]
+    .filter((value): value is string => value !== undefined);
+  if (new Set(native).size > 1) {
+    throw new CaptionFetchError("native language metadata is contradictory");
+  }
+  if (!native.length && requestedLanguage === "auto") {
+    throw new CaptionLanguageAmbiguous();
+  }
+  const language = requestedLanguage === "auto" ? native[0] : requestedLanguage;
+  if (native.length && native[0] !== language) {
+    throw new CaptionFetchError(
+      `native language is ${native[0]}, not ${language}`,
+    );
+  }
+  if (language !== "ko" && language !== "en") {
+    throw new CaptionFetchError(`unsupported native language: ${language}`);
+  }
+  const captions = (source: "manual" | "auto") => {
+    const value =
+      info[source === "manual" ? "subtitles" : "automatic_captions"];
+    return isRecord(value) ? value : {};
+  };
+  const nativeTag = typeof info.language === "string" &&
+      baseLanguage(info.language) === language
+    ? info.language
+    : language;
+  const find = (
+    source: "manual" | "auto",
+    tags: string[],
+  ): CaptionTrack | undefined => {
+    const available = captions(source);
+    for (const tag of tags) {
+      const format = bestFormat(available[tag]);
+      if (format) return { language, source, format, tag };
+    }
+    return undefined;
+  };
+  if (language === "ko") {
+    const track = find("auto", [nativeTag, "ko", "ko-orig"]);
+    if (track) return track;
+    throw new CaptionUnavailable(String(info.id ?? "unknown"), "ko");
+  }
+  const manualTags = [
+    nativeTag,
+    "en",
+    ...Object.keys(captions("manual"))
+      .filter((tag) => /^en-[A-Za-z]{2,3}$/u.test(tag)),
+  ];
+  const manual = find("manual", [...new Set(manualTags)]);
+  if (manual) return manual;
+  const auto = find("auto", ["en-orig", nativeTag, "en"]);
+  if (auto) return auto;
+  throw new CaptionUnavailable(String(info.id ?? "unknown"), "en");
+}
+
 export type CommandRunner = (
   executable: string,
   args: string[],
   cwd: string,
-) => Promise<{ code: number; stderr: string }>;
+) => Promise<{ code: number; stdout: string; stderr: string }>;
 
 const runCommand: CommandRunner = async (executable, args, cwd) => {
   const result = await new Deno.Command(executable, {
     args,
     cwd,
-    stdout: "null",
+    stdout: "piped",
     stderr: "piped",
   }).output();
-  return { code: result.code, stderr: new TextDecoder().decode(result.stderr) };
+  return {
+    code: result.code,
+    stdout: new TextDecoder().decode(result.stdout),
+    stderr: new TextDecoder().decode(result.stderr),
+  };
 };
 
 async function existsNonempty(path: string): Promise<boolean> {
@@ -152,35 +259,76 @@ async function existsNonempty(path: string): Promise<boolean> {
 export async function fetchCaption(
   videoId: string,
   workDir: string,
-  toolPaths: { deno: string; ytdlp: string },
+  toolPaths: ToolPaths,
   runner: CommandRunner = runCommand,
-): Promise<{ captionPath: string; infoPath: string }> {
+  requestedLanguage: RequestedLanguage = "auto",
+): Promise<{ captionPath: string; infoPath: string; track: CaptionTrack }> {
   if (!VIDEO_ID.test(videoId)) throw new CaptionFetchError("invalid video ID");
   await Deno.mkdir(workDir, { recursive: true });
-  const captionPath = `${workDir}/${videoId}.ko.json3`;
   const infoPath = `${workDir}/${videoId}.info.json`;
-  if (await existsNonempty(captionPath) || await existsNonempty(infoPath)) {
+  if (await existsNonempty(infoPath)) {
+    throw new CaptionFetchError(
+      "output files already exist; use a new work directory",
+    );
+  }
+  const commonArgs = [
+    "--ignore-config",
+    "--no-playlist",
+    "--skip-download",
+    "--js-runtimes",
+    `deno:${toolPaths.deno}`,
+  ];
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+  let result: { code: number; stdout: string; stderr: string };
+  try {
+    result = await runner(toolPaths.ytdlp, [
+      ...commonArgs,
+      "--dump-single-json",
+      url,
+    ], workDir);
+  } catch (error) {
+    throw new CaptionFetchError(String(error));
+  }
+  if (result.code !== 0) {
+    throw new CaptionFetchError(
+      result.stderr.trim().slice(-500) || `yt-dlp exited with ${result.code}`,
+    );
+  }
+  let info: unknown;
+  try {
+    info = JSON.parse(result.stdout);
+  } catch {
+    throw new CaptionFetchError("video metadata is malformed");
+  }
+  if (!isRecord(info) || info.id !== videoId) {
+    throw new CaptionFetchError("video metadata ID does not match URL");
+  }
+  if (
+    typeof info.duration !== "number" || info.duration <= 0 ||
+    info.duration > 10800
+  ) {
+    throw new CaptionFetchError(
+      "video duration must be between 1 second and 3 hours",
+    );
+  }
+  const track = selectCaptionTrack(info, requestedLanguage);
+  const captionPath = `${workDir}/${videoId}.${track.tag}.${track.format}`;
+  if (await existsNonempty(captionPath)) {
     throw new CaptionFetchError(
       "output files already exist; use a new work directory",
     );
   }
   const args = [
-    "--ignore-config",
-    "--no-playlist",
-    "--skip-download",
-    "--write-auto-subs",
+    ...commonArgs,
+    track.source === "manual" ? "--write-subs" : "--write-auto-subs",
     "--sub-langs",
-    "ko",
+    track.tag,
     "--sub-format",
-    "json3",
-    "--write-info-json",
-    "--js-runtimes",
-    `deno:${toolPaths.deno}`,
+    track.format,
     "--output",
     "%(id)s.%(ext)s",
-    `https://www.youtube.com/watch?v=${videoId}`,
+    url,
   ];
-  let result: { code: number; stderr: string };
   try {
     result = await runner(toolPaths.ytdlp, args, workDir);
   } catch (error) {
@@ -192,28 +340,6 @@ export async function fetchCaption(
     );
   }
   if (!await existsNonempty(captionPath)) throw new CaptionUnavailable(videoId);
-  if (!await existsNonempty(infoPath)) {
-    throw new CaptionFetchError("video metadata is missing");
-  }
-  let info: unknown;
-  try {
-    info = JSON.parse(await Deno.readTextFile(infoPath));
-  } catch {
-    throw new CaptionFetchError("video metadata is malformed");
-  }
-  if (
-    typeof info !== "object" || info === null || !("id" in info) ||
-    info.id !== videoId
-  ) {
-    throw new CaptionFetchError("video metadata ID does not match URL");
-  }
-  if (
-    !("duration" in info) || typeof info.duration !== "number" ||
-    info.duration <= 0 || info.duration > 10800
-  ) {
-    throw new CaptionFetchError(
-      "video duration must be between 1 second and 3 hours",
-    );
-  }
-  return { captionPath, infoPath };
+  await Deno.writeTextFile(infoPath, JSON.stringify(info));
+  return { captionPath, infoPath, track };
 }
