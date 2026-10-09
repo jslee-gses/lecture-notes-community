@@ -79,7 +79,10 @@
   const rows = [...document.querySelectorAll("[data-transcript-row]")];
   const count = document.getElementById("search-count");
   const empty = document.getElementById("search-empty");
-  const originalText = new Map(rows.map((row) => [row, row.querySelector("p").textContent]));
+  const originalText = new Map(rows.map((row) => [
+    row,
+    [...row.querySelectorAll(".transcript-copy p")].map((paragraph) => [paragraph, paragraph.textContent]),
+  ]));
   function renderHighlight(paragraph, source, query) {
     if (!query) {
       paragraph.textContent = source;
@@ -104,9 +107,11 @@
     const query = search.value.trim().toLocaleLowerCase();
     let visible = 0;
     for (const row of rows) {
-      const source = originalText.get(row);
-      row.hidden = !source.toLocaleLowerCase().includes(query);
-      renderHighlight(row.querySelector("p"), source, query);
+      const fields = originalText.get(row);
+      row.hidden = !fields.some(([, source]) => source.toLocaleLowerCase().includes(query));
+      for (const [paragraph, source] of fields) {
+        renderHighlight(paragraph, source, query);
+      }
       if (!row.hidden) visible++;
     }
     count.textContent = `${visible}개 구간`;

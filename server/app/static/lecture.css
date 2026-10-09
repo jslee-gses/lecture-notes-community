@@ -33,6 +33,8 @@ h1 { margin-bottom:14px; font-size:clamp(1.6rem,2.6vw,2.6rem); letter-spacing:-.
 .transcript-row { display:grid; grid-template-columns:52px minmax(0,1fr); gap:12px; padding:12px 18px; border-bottom:1px solid #edf0f3; }
 .transcript-time { align-self:start; border:0; background:transparent; padding:0; color:var(--accent); font-size:.78rem; font-weight:700; text-align:left; }
 .transcript-row p { margin:0; font-size:.86rem; overflow-wrap:anywhere; }
+.transcript-copy { min-width:0; display:grid; gap:5px; }
+.transcript-row .transcript-translation { color:var(--muted); }
 .transcript-row mark { background:#ffeb8a; color:#111; border-radius:2px; }
 .search-empty { padding:15px; text-align:center; color:var(--muted); }
 .detail-tabs { min-width:0; border:1px solid var(--line); border-radius:12px; background:#fff; }

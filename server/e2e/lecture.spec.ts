@@ -105,3 +105,35 @@ test("mobile_order_and_white_background", async ({ page }) => {
   await expect(page.getByTestId("search-count")).toContainText("1");
   await expect(page.getByRole("heading", { name: "자료 구조 입문" })).toBeVisible();
 });
+
+test("bilingual_search_highlights_both_languages", async ({ page }) => {
+  await page.route("https://www.youtube.com/iframe_api", (route) => route.abort());
+  await page.goto("/fixture-en");
+  const rows = page.locator("[data-transcript-row]");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.first().locator("p")).toHaveCount(2);
+  await expect(rows.first()).toContainText("An array stores data");
+  await expect(rows.first()).toContainText("배열은 연속된 데이터를 저장합니다.");
+  const search = page.getByTestId("transcript-search");
+  await search.fill("ARRAY");
+  await expect(page.locator("[data-transcript-row]:visible")).toHaveCount(2);
+  await expect(rows.first().locator("p").first().locator("mark")).toHaveText("array");
+  await search.fill("배열은");
+  await expect(page.locator("[data-transcript-row]:visible")).toHaveCount(1);
+  await expect(rows.first().locator("p").last().locator("mark")).toHaveText("배열은");
+  await search.fill("<SCRIPT>");
+  await expect(page.locator("[data-transcript-row]:visible")).toHaveCount(1);
+  await expect(rows.first().locator("p").first().locator("mark")).toHaveText("<script>");
+  expect(await page.evaluate(() => (window as any).__injected)).toBeUndefined();
+  await search.fill("");
+  await expect(rows.locator("mark")).toHaveCount(0);
+});
+
+test("legacy_korean_viewer_survives", async ({ page }) => {
+  await page.route("https://www.youtube.com/iframe_api", (route) => route.abort());
+  await page.goto("/fixture");
+  await expect(page.locator("[data-transcript-row]")).toHaveCount(4);
+  await expect(page.locator("[data-transcript-row]").first().locator("p")).toHaveCount(1);
+  await expect(page.locator("[data-transcript-row]").first()).toContainText("배열은 연속된 데이터를 저장합니다.");
+  await expect(page.locator("[data-transcript-row]").first().locator("button[data-seek]")).toHaveCount(1);
+});
