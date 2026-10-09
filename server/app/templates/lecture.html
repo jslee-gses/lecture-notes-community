@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>{{ document.lecture.title }} · Lecture Notes</title>
+  <title>{{ document.lecture.title }}</title>
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='/lecture.css') }}">
   <script defer src="{{ request.app.url_path_for('static', path='/lecture.js') }}"></script>
 </head>
 <body>
 <div id="lecture-app" class="app-shell" data-video-id="{{ document.lecture.video_id }}">
-  <header class="site-header"><a class="back-link" href="/">← 강의 목록</a><span class="site-name">Lecture Notes</span></header>
+  <header class="site-header"><a class="back-link" href="/">← 강의 목록</a></header>
   <section class="hero" aria-labelledby="lecture-title">
     <h1 id="lecture-title">{{ document.lecture.title }}</h1>
     <div class="hero-meta"><span>{{ timestamp(document.lecture.duration_sec) }} 분량</span><span>{{ document.segments|length }}개 자막 구간</span><span>{{ document.outline.chapters|length }}개 메인 목차</span><span>{{ expires_at }}까지</span></div>

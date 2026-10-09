@@ -7,7 +7,6 @@ button { cursor:pointer; }
 .app-shell { max-width:1600px; margin:auto; }
 .site-header { min-height:62px; padding:14px 4%; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); }
 .back-link { color:var(--accent); font-weight:700; text-decoration:none; }
-.site-name { color:var(--muted); font-size:.83rem; letter-spacing:.04em; }
 .hero { padding:26px 4% 22px; }
 h1,h2,h3,p { margin-top:0; }
 h1 { margin-bottom:14px; font-size:clamp(1.6rem,2.6vw,2.6rem); letter-spacing:-.035em; overflow-wrap:anywhere; }

@@ -3,7 +3,6 @@
 body { margin: 0; background: #fff; }
 .catalog-shell { max-width: 1160px; margin: 0 auto; padding: 48px 28px 88px; }
 .catalog-header { padding-bottom: 32px; border-bottom: 1px solid #dfe5eb; }
-.brand { color: #315c8e; font-size: .88rem; font-weight: 750; letter-spacing: .04em; }
 h1 { margin: 16px 0 10px; font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -.04em; }
 .catalog-header p { margin: 0; color: #596677; line-height: 1.6; }
 .lecture-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 20px; padding: 32px 0; }
