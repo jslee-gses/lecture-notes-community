@@ -29,17 +29,31 @@
     setFallback(seconds);
     if (ready) player.seekTo(seconds, true);
     else pendingSeek = seconds;
-    document.querySelector(".video-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
-  for (const toggle of document.querySelectorAll("[data-toc-toggle]")) {
-    toggle.addEventListener("click", () => {
-      const open = toggle.getAttribute("aria-expanded") !== "true";
-      toggle.setAttribute("aria-expanded", String(open));
-      toggle.setAttribute("aria-label", open ? "세부 목차 접기" : "세부 목차 펼치기");
-      toggle.closest(".toc-chapter").classList.toggle("is-open", open);
+  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  function activateTab(index, focus = false) {
+    tabs.forEach((tab, position) => {
+      const active = position === index;
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+      document.getElementById(tab.getAttribute("aria-controls")).hidden = !active;
     });
+    if (focus) tabs[index].focus();
   }
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => activateTab(index));
+    tab.addEventListener("keydown", (event) => {
+      let next;
+      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+      else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      activateTab(next, true);
+    });
+  });
 
   window.onYouTubeIframeAPIReady = () => {
     player = new YT.Player("player", {
@@ -65,11 +79,34 @@
   const rows = [...document.querySelectorAll("[data-transcript-row]")];
   const count = document.getElementById("search-count");
   const empty = document.getElementById("search-empty");
+  const originalText = new Map(rows.map((row) => [row, row.querySelector("p").textContent]));
+  function renderHighlight(paragraph, source, query) {
+    if (!query) {
+      paragraph.textContent = source;
+      return;
+    }
+    const lower = source.toLocaleLowerCase();
+    const parts = [];
+    let from = 0;
+    while (from < source.length) {
+      const match = lower.indexOf(query, from);
+      if (match === -1) break;
+      if (match > from) parts.push(document.createTextNode(source.slice(from, match)));
+      const mark = document.createElement("mark");
+      mark.textContent = source.slice(match, match + query.length);
+      parts.push(mark);
+      from = match + query.length;
+    }
+    parts.push(document.createTextNode(source.slice(from)));
+    paragraph.replaceChildren(...parts);
+  }
   search.addEventListener("input", () => {
-    const query = search.value.trim().toLocaleLowerCase("ko");
+    const query = search.value.trim().toLocaleLowerCase();
     let visible = 0;
     for (const row of rows) {
-      row.hidden = !row.textContent.toLocaleLowerCase("ko").includes(query);
+      const source = originalText.get(row);
+      row.hidden = !source.toLocaleLowerCase().includes(query);
+      renderHighlight(row.querySelector("p"), source, query);
       if (!row.hidden) visible++;
     }
     count.textContent = `${visible}개 구간`;

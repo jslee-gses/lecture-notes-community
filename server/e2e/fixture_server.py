@@ -14,9 +14,23 @@ fixture = Path(__file__).resolve().parents[2] / "plugins" / "lecture-notes" / "t
 now = datetime(2026, 10, 9, 12, tzinfo=timezone.utc)
 repository = MemoryRepository(clock=lambda: now)
 saved = repository.insert_or_get(json.loads(fixture.read_text(encoding="utf-8")), "e2e-client", is_listed=True)
+long_document = json.loads(fixture.read_text(encoding="utf-8"))
+long_document["run_id"] = "fbb764d7-740f-4d21-9ae3-2635bfbb474b"
+long_document["segments"] = [
+    {**long_document["segments"][0], "start_sec": number * 8,
+     "end_sec": number * 8 + 7,
+     "text": f"긴 전사 {number} C++ [배열] <script>window.__injected=true</script>" if number == 2 else f"긴 전사 {number} 배열 설명"}
+    for number in range(120)
+]
+long_saved = repository.insert_or_get(long_document, "e2e-client")
 app = create_app(Settings(public_base_url="http://127.0.0.1:8765", ip_hash_secret=b"e2e"), repository, clock=lambda: now)
 
 
 @app.get("/fixture")
 def fixture_redirect():
     return RedirectResponse(f"/api/lectures/{saved.share_token}")
+
+
+@app.get("/fixture-long")
+def long_fixture_redirect():
+    return RedirectResponse(f"/api/lectures/{long_saved.share_token}")

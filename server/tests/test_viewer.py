@@ -37,6 +37,10 @@ def test_share_page():
     assert "lecture.js" in response.text
     assert 'href="/static/lecture.css"' in response.text
     assert 'src="/static/lecture.js"' in response.text
+    for phrase in ["링크를 아는 사람과 공유", "KOREAN LECTURE · AUTO CAPTIONS", "강의의 흐름, 핵심 내용, 용어를 원본 영상의 시점과 함께 살펴보세요.", "LECTURE / NOTES"]:
+        assert phrase not in response.text
+    assert 'role="tablist"' in response.text
+    assert 'href="/"' in response.text
 
     data = client.get(f"/api/lectures/{saved.share_token}/data")
     assert data.status_code == 200
