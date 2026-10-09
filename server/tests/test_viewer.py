@@ -34,6 +34,8 @@ def test_share_page():
     assert "배열은 연속된 데이터를 저장합니다." in response.text
     assert "lecture.css" in response.text
     assert "lecture.js" in response.text
+    assert 'href="/static/lecture.css"' in response.text
+    assert 'src="/static/lecture.js"' in response.text
 
     data = client.get(f"/api/lectures/{saved.share_token}/data")
     assert data.status_code == 200

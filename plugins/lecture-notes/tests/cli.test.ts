@@ -202,3 +202,56 @@ Deno.test("test_fetch_resume_uses_existing_files", async () => {
     await Deno.remove(runDir, { recursive: true });
   }
 });
+
+Deno.test("test_prepare_clamps_small_caption_tail_only", async () => {
+  for (const extraSeconds of [1.52, 20]) {
+    const runDir = await Deno.makeTempDir();
+    try {
+      await Deno.writeTextFile(
+        `${runDir}/source.json`,
+        JSON.stringify({
+          schema_version: "1.0",
+          run_id: fixture.run_id,
+          lecture: { ...fixture.lecture, duration_sec: 10 },
+        }),
+      );
+      await Deno.writeTextFile(
+        `${runDir}/${fixture.lecture.video_id}.ko.json3`,
+        JSON.stringify({
+          events: [
+            {
+              tStartMs: 9000,
+              dDurationMs: 1000 + extraSeconds * 1000,
+              segs: [{ utf8: "강의 마무리" }],
+            },
+          ],
+        }),
+      );
+      if (extraSeconds < 5) {
+        await prepareRun(runDir);
+        const segments = JSON.parse(
+          await Deno.readTextFile(`${runDir}/segments.json`),
+        );
+        if (
+          segments.length !== 1 || segments[0].end_sec !== 10 ||
+          segments[0].text !== "강의 마무리"
+        ) {
+          throw new Error(
+            "Small caption tail was not capped without dropping speech",
+          );
+        }
+      } else {
+        try {
+          await prepareRun(runDir);
+          throw new Error("Large caption overrun was accepted");
+        } catch (error) {
+          if (
+            !(error instanceof Error) || !error.message.includes("extends past")
+          ) throw error;
+        }
+      }
+    } finally {
+      await Deno.remove(runDir, { recursive: true });
+    }
+  }
+});

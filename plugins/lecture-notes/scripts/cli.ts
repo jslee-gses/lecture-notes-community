@@ -7,6 +7,7 @@ import { fetchCaption, parseJson3 } from "./captions.ts";
 import { type Chunk, chunkSegments } from "./chunk.ts";
 import type { LectureDocument, Segment } from "./types.ts";
 import { parseVideoId } from "./url.ts";
+import { uploadLecture, type UploadResult } from "./upload.ts";
 
 interface Source {
   schema_version: "1.0";
@@ -18,7 +19,7 @@ function path(base: string, relative: string): string {
   return `${base}/${relative}`;
 }
 
-async function readJson(file: string): Promise<unknown> {
+async function readJson(file: string | URL): Promise<unknown> {
   try {
     return JSON.parse(await Deno.readTextFile(file));
   } catch (error) {
@@ -152,8 +153,16 @@ export async function prepareRun(runDir: string): Promise<Chunk[]> {
     path(runDir, `${source.lecture.video_id}.ko.json3`),
   );
   const segments = parseJson3(raw);
-  if (segments.at(-1)!.end_sec > source.lecture.duration_sec) {
-    throw new Error("/segments: caption extends past video duration");
+  const duration = source.lecture.duration_sec;
+  if (segments.at(-1)!.end_sec > duration) {
+    const tail = segments.at(-1)!;
+    if (
+      tail.end_sec - duration > 5 ||
+      segments.some((segment) => segment.start_sec >= duration)
+    ) {
+      throw new Error("/segments: caption extends past video duration");
+    }
+    tail.end_sec = duration;
   }
   const chunks = chunkSegments(segments);
   await writeOnce(path(runDir, "segments.json"), segments);
@@ -252,6 +261,26 @@ export async function assembleRun(runDir: string): Promise<LectureDocument> {
   return lecture;
 }
 
+export async function uploadRun(
+  runDir: string,
+  serverUrl?: string,
+): Promise<UploadResult> {
+  let baseUrl = serverUrl;
+  if (!baseUrl) {
+    const config = await readJson(new URL("../server.json", import.meta.url));
+    if (
+      !isObject(config) || typeof config.base_url !== "string" ||
+      !config.base_url
+    ) {
+      throw new Error(
+        "public upload server is not configured in the plugin package",
+      );
+    }
+    baseUrl = config.base_url;
+  }
+  return await uploadLecture(path(runDir, "lecture.json"), baseUrl);
+}
+
 if (import.meta.main) {
   try {
     const [command, ...args] = Deno.args;
@@ -265,9 +294,13 @@ if (import.meta.main) {
     } else if (command === "assemble" && args.length === 1) {
       const doc = await assembleRun(args[0]);
       result = { path: path(args[0], "lecture.json"), run_id: doc.run_id };
+    } else if (
+      command === "upload" && (args.length === 1 || args.length === 2)
+    ) {
+      result = await uploadRun(args[0], args[1]);
     } else {
       throw new Error(
-        "Usage: cli.ts doctor <workspace> | fetch <url> <run-dir> <workspace> | prepare <run-dir> | assemble <run-dir>",
+        "Usage: cli.ts doctor <workspace> | fetch <url> <run-dir> <workspace> | prepare <run-dir> | assemble <run-dir> | upload <run-dir> [server-url]",
       );
     }
     console.log(JSON.stringify(result));

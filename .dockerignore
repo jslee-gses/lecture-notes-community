@@ -1,0 +1,13 @@
+.git
+.lecture-notes
+.superpowers
+server/node_modules
+server/e2e
+server/tests
+server/package.json
+server/package-lock.json
+server/playwright.config.ts
+plugins/lecture-notes/tools
+plugins/lecture-notes/scripts
+plugins/lecture-notes/tests
+plugins/lecture-notes/skills

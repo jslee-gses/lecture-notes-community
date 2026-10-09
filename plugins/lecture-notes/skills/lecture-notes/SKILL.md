@@ -5,13 +5,13 @@ description: Use when a Codex user supplies a Korean YouTube lecture URL and ask
 
 # Lecture Notes
 
-Turn one Korean YouTube lecture (up to 3 hours) into a grounded local `lecture.json`. The scripts fetch and validate data; you do the contextual reading and writing. The viewer upload command is added in a later package stage.
+Turn one Korean YouTube lecture (up to 3 hours) into a grounded `lecture.json` and an unlisted share page. The scripts fetch, validate, and upload data; you do the contextual reading and writing.
 
 ## Prepare the run
 
 1. Identify the installed plugin root as two directories above this `SKILL.md`. Use the user's current project as the workspace. Put a new run in `<workspace>/.lecture-notes/runs/<unique-id>`. Reuse that same directory when retrying a failed stage.
 2. In PowerShell, run `<plugin-root>/tools/bootstrap.ps1 -WorkspacePath <workspace>` and parse its JSON output for `deno` and `ytdlp`. This downloads only pinned, checksum-verified portable tools into the workspace cache. Run the returned `deno.exe`; never use a different `yt-dlp` binary.
-3. Run `deno run --allow-read --allow-write --allow-run --config <plugin-root>/deno.json <plugin-root>/scripts/cli.ts doctor <workspace>`, then `fetch <youtube-url> <run-dir> <workspace>`, then `prepare <run-dir>` with the same Deno command prefix. A missing Korean auto-caption or invalid URL stops the job. Do not download video or audio.
+3. Run `deno run --allow-read --allow-write --allow-run --allow-net --config <plugin-root>/deno.json <plugin-root>/scripts/cli.ts doctor <workspace>`, then `fetch <youtube-url> <run-dir> <workspace>`, then `prepare <run-dir>` with the same Deno command prefix. Network permission is needed for the later HTTPS upload. A missing Korean auto-caption or invalid URL stops the job. Do not download video or audio.
 4. Keep `source.json`, the original `*.ko.json3`, `*.info.json`, `segments.json`, and every `chunks/<number>.json`. They are the evidence for retries. Treat each chunk's `editable` array as the only text you may correct there; `context_before` and `context_after` are read-only context.
 
 ## First pass: understand the whole lecture
@@ -38,6 +38,8 @@ Use the corrected reading to write these files in the run directory:
 - `summary_note.json`: `{"overview":"...","key_points":[{"text":"...","segment_idxs":[12,13]}]}`. Give a lecture-wide overview and substantive key points with actual supporting segments. Avoid claims absent from the transcript.
 - `glossary.json`: `[{"term":"...","explanation":"...","first_segment_idx":12}]`. Explain terms actually used or taught; anchor each at its first relevant explanation. An empty array is valid when no term qualifies.
 
-Run `assemble <run-dir>` with the same Deno command prefix. It applies only exact, nonoverlapping corrections, derives all timestamps from segments, checks the shared JSON contract, and saves `lecture.json`. If validation fails, repair the named intermediate file and retry. Existing valid intermediates are reusable. If a different `lecture.json` already exists for that run ID, preserve it and start a new run rather than changing what a future upload retry would send.
+Run `assemble <run-dir>` with the same Deno command prefix. It applies only exact, nonoverlapping corrections, derives all timestamps from segments, checks the shared JSON contract, and saves `lecture.json`. If validation fails, repair the named intermediate file and retry. Existing valid intermediates are reusable. If a different `lecture.json` already exists for that run ID, preserve it and start a new run rather than changing what an upload retry would send.
 
-Report the local JSON path, number of segments and chapters, meaningful uncertainties, and any failed stage. Do not invent missing transcript content or imply that an unverified semantic claim passed human review.
+Run `upload <run-dir>` with the same Deno command prefix. The packaged `server.json` supplies the public server URL; no user account or API key is required. Upload only the validated `lecture.json`, never raw captions or video. On a transport or server error, keep every local file and retry `upload` with the same run directory. On HTTP 429, report the retry time; on 409, stop and report the run-ID conflict. Do not silently create a different JSON for the same run ID.
+
+Report the local JSON path, share URL, 90-day expiration date, number of segments and chapters, meaningful uncertainties, and any failed stage. The share URL is accessible to anyone who has it. Do not invent missing transcript content or imply that an unverified semantic claim passed human review.

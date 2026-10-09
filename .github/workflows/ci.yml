@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.5.6
+      - name: Check TypeScript
+        run: deno check --config plugins/lecture-notes/deno.json plugins/lecture-notes/scripts/cli.ts
+      - name: Test plugin
+        run: deno test --allow-read --allow-write --allow-run --config plugins/lecture-notes/deno.json plugins/lecture-notes/tests/*.test.ts
+      - name: Check format
+        run: deno fmt --check plugins/lecture-notes/scripts plugins/lecture-notes/tests
+
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: lecture
+          POSTGRES_PASSWORD: lecture_test_password
+          POSTGRES_DB: lecture_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lecture -d lecture_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql://lecture:lecture_test_password@localhost:5432/lecture_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - run: pip install -r server/requirements.txt
+      - name: Test API and PostgreSQL
+        run: python -m pytest -q server/tests
+      - name: Validate Docker build
+        run: docker build -t lecture-notes-server .
+
+  windows-bootstrap:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test portable Windows tool cache
+        shell: pwsh
+        run: ./plugins/lecture-notes/tests/bootstrap.test.ps1

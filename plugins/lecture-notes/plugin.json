@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "lecture-notes",
+  "version": "0.1.0",
+  "description": "Turn Korean YouTube lectures into grounded, timestamped notes and unlisted share pages.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Lecture Notes",
+        "shortDescription": "Korean lecture outlines, notes, and glossary",
+        "longDescription": "Create a timestamped outline, lecture-wide notes, and glossary from Korean YouTube auto-captions, then share a private-link viewer.",
+        "developerName": "Lecture Notes Community",
+        "category": "Productivity",
+        "defaultPrompt": [
+          "이 유튜브 강의를 목차, 요약노트, 용어집으로 정리해줘."
+        ]
+      }
+    }
+  }
+}
