@@ -46,6 +46,62 @@ def test_migration_is_repeatable(database):
         assert connection.execute("SELECT to_regclass('lectures')").fetchone()[0] == "lectures"
 
 
+def test_public_listing_migration_preserves_old_rows(database):
+    old = document()
+    with psycopg.connect(database) as connection:
+        connection.execute("ALTER TABLE lectures DROP COLUMN is_listed")
+        connection.execute(
+            "INSERT INTO lectures (run_id, body_hash, share_token, client_key, created_at, expires_at, document) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (old["run_id"], "a" * 64, "old-token", "b" * 64,
+             datetime(2026, 10, 9, tzinfo=timezone.utc), datetime(2027, 1, 7, tzinfo=timezone.utc), Jsonb(old)),
+        )
+    apply_migrations(database)
+    apply_migrations(database)
+    with psycopg.connect(database) as connection:
+        assert connection.execute("SELECT is_listed FROM lectures WHERE run_id = %s", (old["run_id"],)).fetchone()[0] is False
+
+
+def test_public_query_order_and_page_size(database):
+    now = [datetime(2026, 10, 9, 12, tzinfo=timezone.utc)]
+    repository = Repository(database, limits=QuotaLimits(per_hour=100, per_day=100, global_day=100), clock=lambda: now[0])
+    expected = []
+    for number in range(21):
+        now[0] += timedelta(seconds=1)
+        entry = document()
+        entry["lecture"]["title"] = f"Public {number}"
+        if number == 20:
+            entry["lecture"]["duration_sec"] = float(entry["lecture"]["duration_sec"])
+        expected.append(repository.insert_or_get(entry, "a" * 64, is_listed=True))
+    repository.insert_or_get(document(), "a" * 64)
+    now[0] += timedelta(seconds=1)
+    expired = repository.insert_or_get(document(), "a" * 64, is_listed=True)
+    with psycopg.connect(database) as connection:
+        connection.execute("UPDATE lectures SET expires_at = %s WHERE run_id = %s", (now[0], expired.run_id))
+    first, has_next = repository.list_public(1)
+    second, last_has_next = repository.list_public(2)
+    assert [item.share_token for item in first] == [item.share_token for item in reversed(expected[1:])]
+    assert [item.share_token for item in second] == [expected[0].share_token]
+    assert first[0].title == "Public 20"
+    assert first[0].duration_sec == expected[-1].document["lecture"]["duration_sec"]
+    assert has_next is True
+    assert last_has_next is False
+
+
+def test_public_visibility_is_immutable_on_retry(database):
+    repository = Repository(database, limits=QuotaLimits(per_hour=2, per_day=2, global_day=2))
+    private = document()
+    public = document()
+    first_private = repository.insert_or_get(private, "a" * 64)
+    first_public = repository.insert_or_get(public, "a" * 64, is_listed=True)
+    assert repository.insert_or_get(private, "a" * 64, is_listed=True).is_listed is False
+    assert repository.insert_or_get(public, "a" * 64).is_listed is True
+    assert repository.list_public(1)[0][0].share_token == first_public.share_token
+    with psycopg.connect(database) as connection:
+        assert connection.execute("SELECT count(*) FROM lectures").fetchone()[0] == 2
+        assert connection.execute("SELECT is_listed FROM lectures WHERE run_id = %s", (first_private.run_id,)).fetchone()[0] is False
+
+
 def test_idempotence_conflict_and_expiry(database):
     now = [datetime(2026, 10, 9, 12, tzinfo=timezone.utc)]
     repository = Repository(database, clock=lambda: now[0])

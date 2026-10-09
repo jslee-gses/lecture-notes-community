@@ -11,7 +11,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .models import RunIdConflict, SavedLecture, UploadsDisabled
+from .models import PublicLecture, RunIdConflict, SavedLecture, UploadsDisabled
 from .rate_limit import QuotaLimits, enforce_limits
 
 
@@ -57,7 +57,7 @@ class Repository:
             raise RuntimeError("DATABASE_URL is not configured")
         return psycopg.connect(self.database_url, row_factory=dict_row)
 
-    def insert_or_get(self, doc: dict, client_key: str, previous_client_key: str | None = None) -> SavedLecture:
+    def insert_or_get(self, doc: dict, client_key: str, previous_client_key: str | None = None, *, is_listed: bool = False) -> SavedLecture:
         body_hash = canonical_hash(doc)
         now = self.clock()
         previous_client_key = previous_client_key or client_key
@@ -92,11 +92,11 @@ class Repository:
                 expires_at = now + timedelta(days=RETENTION_DAYS)
                 cursor.execute(
                     """
-                    INSERT INTO lectures (run_id, body_hash, share_token, client_key, created_at, expires_at, document)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO lectures (run_id, body_hash, share_token, client_key, created_at, expires_at, document, is_listed)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING *
                     """,
-                    (doc["run_id"], body_hash, share_token, client_key, now, expires_at, Jsonb(doc)),
+                    (doc["run_id"], body_hash, share_token, client_key, now, expires_at, Jsonb(doc), is_listed),
                 )
                 return self._saved(cursor.fetchone())
 
@@ -106,6 +106,23 @@ class Repository:
                 cursor.execute("SELECT * FROM lectures WHERE share_token = %s AND expires_at > %s", (share_token, self.clock()))
                 row = cursor.fetchone()
                 return self._saved(row) if row else None
+
+    def list_public(self, page: int, page_size: int = 20) -> tuple[list[PublicLecture], bool]:
+        if page < 1 or page_size < 1:
+            raise ValueError("page and page_size must be positive")
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """SELECT share_token, document #>> '{lecture,title}' AS title,
+                              (document #>> '{lecture,duration_sec}')::numeric::integer AS duration_sec, created_at
+                       FROM lectures
+                       WHERE is_listed AND expires_at > %s
+                       ORDER BY created_at DESC, run_id DESC
+                       LIMIT %s OFFSET %s""",
+                    (self.clock(), page_size + 1, (page - 1) * page_size),
+                )
+                rows = cursor.fetchall()
+        return [PublicLecture(**row) for row in rows[:page_size]], len(rows) > page_size
 
     def delete_expired(self, now: datetime) -> int:
         with self._connect() as connection:
@@ -123,6 +140,7 @@ class Repository:
             created_at=row["created_at"],
             expires_at=row["expires_at"],
             document=row["document"],
+            is_listed=row["is_listed"],
         )
 
 
@@ -150,7 +168,7 @@ class MemoryRepository:
     def quota_count(self) -> int:
         return len(self._by_run_id)
 
-    def insert_or_get(self, doc: dict, client_key: str, previous_client_key: str | None = None) -> SavedLecture:
+    def insert_or_get(self, doc: dict, client_key: str, previous_client_key: str | None = None, *, is_listed: bool = False) -> SavedLecture:
         body_hash = canonical_hash(doc)
         now = self.clock()
         previous_client_key = previous_client_key or client_key
@@ -178,6 +196,7 @@ class MemoryRepository:
                 created_at=now,
                 expires_at=now + timedelta(days=RETENTION_DAYS),
                 document=doc,
+                is_listed=is_listed,
             )
             self._by_run_id[saved.run_id] = saved
             self._by_token[saved.share_token] = saved
@@ -186,6 +205,23 @@ class MemoryRepository:
     def get_active(self, share_token: str) -> SavedLecture | None:
         saved = self._by_token.get(share_token)
         return saved if saved and saved.expires_at > self.clock() else None
+
+    def list_public(self, page: int, page_size: int = 20) -> tuple[list[PublicLecture], bool]:
+        if page < 1 or page_size < 1:
+            raise ValueError("page and page_size must be positive")
+        with self._lock:
+            rows = sorted(
+                (row for row in self._by_run_id.values() if row.is_listed and row.expires_at > self.clock()),
+                key=lambda row: (row.created_at, row.run_id),
+                reverse=True,
+            )
+            offset = (page - 1) * page_size
+            selected = rows[offset:offset + page_size + 1]
+            return [
+                PublicLecture(row.share_token, row.document["lecture"]["title"],
+                              int(row.document["lecture"]["duration_sec"]), row.created_at)
+                for row in selected[:page_size]
+            ], len(selected) > page_size
 
     def delete_expired(self, now: datetime) -> int:
         with self._lock:

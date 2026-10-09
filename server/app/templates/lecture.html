@@ -4,100 +4,78 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>{{ document.lecture.title }} · Lecture Notes</title>
+  <title>{{ document.lecture.title }}</title>
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='/lecture.css') }}">
   <script defer src="{{ request.app.url_path_for('static', path='/lecture.js') }}"></script>
 </head>
 <body>
-  <div id="lecture-app" class="app-shell" data-video-id="{{ document.lecture.video_id }}">
-    <header class="site-header">
-      <a class="wordmark" href="#top" aria-label="Lecture Notes 맨 위로">LECTURE<span> / </span>NOTES</a>
-      <div class="header-status"><span class="status-dot"></span> 링크를 아는 사람과 공유</div>
-    </header>
-
-    <section id="top" class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">KOREAN LECTURE · AUTO CAPTIONS</p>
-        <h1>{{ document.lecture.title }}</h1>
-        <p class="hero-description">강의의 흐름, 핵심 내용, 용어를 원본 영상의 시점과 함께 살펴보세요.</p>
-        <div class="hero-meta">
-          <span>{{ timestamp(document.lecture.duration_sec) }} 분량</span>
-          <span>{{ document.segments|length }}개 자막 구간</span>
-          <span>{{ document.outline.chapters|length }}개 메인 목차</span>
+<div id="lecture-app" class="app-shell" data-video-id="{{ document.lecture.video_id }}">
+  <header class="site-header"><a class="back-link" href="/">← 강의 목록</a></header>
+  <section class="hero" aria-labelledby="lecture-title">
+    <h1 id="lecture-title">{{ document.lecture.title }}</h1>
+    <div class="hero-meta"><span>{{ timestamp(document.lecture.duration_sec) }} 분량</span><span>{{ document.segments|length }}개 자막 구간</span><span>{{ document.outline.chapters|length }}개 메인 목차</span><span>{{ expires_at }}까지</span></div>
+  </section>
+  <main class="workspace">
+    <div class="media-column">
+      <section class="video-section" aria-label="원본 강의 영상">
+        <div class="player-frame"><div id="player" class="player-placeholder"><span class="play-glyph" aria-hidden="true">▶</span><p>원본 영상을 불러오는 중입니다</p></div></div>
+        <div class="video-footer"><p id="player-message">시점을 누르면 영상을 이동할 수 있습니다.</p><a data-testid="youtube-fallback" id="youtube-fallback" href="https://www.youtube.com/watch?v={{ document.lecture.video_id }}&amp;t=0s" target="_blank" rel="noopener noreferrer">YouTube에서 열기 ↗</a></div>
+      </section>
+      <section class="transcript-section" aria-labelledby="transcript-title">
+        <div class="section-heading"><h2 id="transcript-title">자막</h2><span id="search-count" data-testid="search-count">{{ document.segments|length }}개 구간</span></div>
+        <div class="search-bar"><label for="transcript-search">전사 검색</label><input id="transcript-search" data-testid="transcript-search" type="search" placeholder="전사에서 검색" autocomplete="off"></div>
+        <div class="transcript-list" tabindex="0" aria-label="시간순 전사">
+          {% for segment in document.segments %}
+          <div class="transcript-row" data-transcript-row><button type="button" class="transcript-time seek-button" data-seek="{{ segment.start_sec }}" aria-label="{{ timestamp(segment.start_sec) }}부터 재생">{{ timestamp(segment.start_sec) }}</button><p>{{ segment.text }}</p></div>
+          {% endfor %}
         </div>
+        <p id="search-empty" class="search-empty" hidden>검색 결과가 없습니다.</p>
+      </section>
+    </div>
+    <section class="detail-tabs" aria-label="강의 내용">
+      <div class="tab-list" role="tablist" aria-label="강의 내용 보기">
+        <button type="button" id="tab-outline" role="tab" aria-controls="panel-outline" aria-selected="true" tabindex="0">목차</button>
+        <button type="button" id="tab-summary" role="tab" aria-controls="panel-summary" aria-selected="false" tabindex="-1">강의 요약</button>
+        <button type="button" id="tab-glossary" role="tab" aria-controls="panel-glossary" aria-selected="false" tabindex="-1">용어집</button>
       </div>
-      <div class="expiry-card">
-        <span class="expiry-icon" aria-hidden="true">↗</span>
-        <div><strong>공유 링크 유효 기간</strong><small>{{ expires_at }}까지</small></div>
+      <div id="panel-outline" class="tab-panel" role="tabpanel" aria-labelledby="tab-outline" tabindex="0">
+        <h2>강의 목차</h2>
+        <nav class="toc" aria-label="강의 목차">
+          {% for chapter in document.outline.chapters %}
+          <div class="toc-chapter">
+            <button type="button" class="toc-main seek-button" data-testid="chapter-{{ loop.index }}" data-seek="{{ chapter.start_sec }}"><span class="toc-index">{{ '%02d'|format(loop.index) }}</span><span class="toc-title">{{ chapter.title }}</span><span class="toc-time">{{ timestamp(chapter.start_sec) }}</span></button>
+            <ul class="toc-children">
+              {% for child in chapter.children %}
+              <li><button type="button" class="toc-child seek-button" data-seek="{{ child.start_sec }}"><span>{{ child.title }}</span><time>{{ timestamp(child.start_sec) }}</time></button></li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endfor %}
+        </nav>
+        <p class="toc-hint">시간을 누르면 영상의 해당 부분으로 이동합니다.</p>
+      </div>
+      <div id="panel-summary" class="tab-panel" role="tabpanel" aria-labelledby="tab-summary" tabindex="0" hidden>
+        <h2>강의 요약노트</h2>
+        <div class="overview-card"><h3>전체 개요</h3><p>{{ document.summary_note.overview }}</p></div>
+        <ol class="key-points">
+          {% for point in document.summary_note.key_points %}
+          <li><span class="point-number">{{ '%02d'|format(loop.index) }}</span><p>{{ point.text }}</p><button type="button" class="time-chip seek-button" data-testid="key-point-{{ loop.index }}" data-seek="{{ point.start_sec }}" aria-label="핵심 내용 {{ loop.index }} {{ timestamp(point.start_sec) }}부터 재생">{{ timestamp(point.start_sec) }} ↗</button></li>
+          {% endfor %}
+        </ol>
+      </div>
+      <div id="panel-glossary" class="tab-panel" role="tabpanel" aria-labelledby="tab-glossary" tabindex="0" hidden>
+        <h2>강의 용어집</h2>
+        {% if document.glossary %}
+        <div class="glossary-grid">
+          {% for item in document.glossary %}
+          <article class="term-card"><div class="term-top"><h3>{{ item.term }}</h3><button type="button" class="time-chip seek-button" data-testid="glossary-{{ loop.index }}" data-seek="{{ item.start_sec }}" aria-label="{{ item.term }} {{ timestamp(item.start_sec) }}부터 재생">{{ timestamp(item.start_sec) }} ↗</button></div><p>{{ item.explanation }}</p></article>
+          {% endfor %}
+        </div>
+        {% else %}<p class="empty-glossary">이 강의에서 별도로 설명할 용어가 없습니다.</p>{% endif %}
       </div>
     </section>
-
-    <div class="workspace">
-      <aside class="sidebar" aria-label="강의 목차">
-        <div class="sidebar-inner">
-          <div class="section-label"><span>01</span> 강의 목차</div>
-          <nav class="toc">
-            {% for chapter in document.outline.chapters %}
-            <div class="toc-chapter">
-              <button type="button" class="toc-main seek-button" data-testid="chapter-{{ loop.index }}" data-seek="{{ chapter.start_sec }}">
-                <span class="toc-index">{{ '%02d'|format(loop.index) }}</span>
-                <span class="toc-title">{{ chapter.title }}</span>
-                <span class="toc-time">{{ timestamp(chapter.start_sec) }}</span>
-              </button>
-              <button type="button" class="toc-toggle" data-toc-toggle aria-expanded="false" aria-label="세부 목차 펼치기" title="세부 목차 펼치기">⌄</button>
-              <ul class="toc-children">
-                {% for child in chapter.children %}
-                <li><button type="button" class="toc-child seek-button" data-seek="{{ child.start_sec }}"><span>{{ child.title }}</span><time>{{ timestamp(child.start_sec) }}</time></button></li>
-                {% endfor %}
-              </ul>
-            </div>
-            {% endfor %}
-          </nav>
-          <p class="toc-hint">시간을 누르면 영상의 해당 부분으로 이동합니다.</p>
-        </div>
-      </aside>
-
-      <main class="main-content">
-        <section class="video-section" aria-label="원본 강의 영상">
-          <div class="section-heading"><div><span class="section-kicker">WATCH THE SOURCE</span><h2>원본 강의</h2></div><span class="section-rule"></span></div>
-          <div class="player-frame"><div id="player" class="player-placeholder"><span class="play-glyph" aria-hidden="true">▶</span><p>원본 영상을 불러오는 중입니다</p></div></div>
-          <div class="video-footer"><p id="player-message">목차와 노트의 시간을 누르면 영상을 이동할 수 있습니다.</p><a data-testid="youtube-fallback" id="youtube-fallback" href="https://www.youtube.com/watch?v={{ document.lecture.video_id }}&amp;t=0s" target="_blank" rel="noopener noreferrer">YouTube에서 열기 ↗</a></div>
-        </section>
-
-        <section class="notes-section" aria-labelledby="notes-title">
-          <div class="section-heading"><div><span class="section-kicker">THE BIG PICTURE</span><h2 id="notes-title">강의 요약노트</h2></div><span class="section-rule"></span></div>
-          <div class="overview-card"><span class="card-label">전체 개요</span><p>{{ document.summary_note.overview }}</p></div>
-          <ol class="key-points">
-            {% for point in document.summary_note.key_points %}
-            <li><span class="point-number">{{ '%02d'|format(loop.index) }}</span><p>{{ point.text }}</p><button type="button" class="time-chip seek-button" data-testid="key-point-{{ loop.index }}" data-seek="{{ point.start_sec }}" aria-label="핵심 내용 {{ loop.index }} {{ timestamp(point.start_sec) }}부터 재생">{{ timestamp(point.start_sec) }} <span aria-hidden="true">↗</span></button></li>
-            {% endfor %}
-          </ol>
-        </section>
-
-        <section class="glossary-section" aria-labelledby="glossary-title">
-          <div class="section-heading"><div><span class="section-kicker">KEY TERMS</span><h2 id="glossary-title">강의 용어집</h2></div><span class="section-rule"></span></div>
-          {% if document.glossary %}
-          <div class="glossary-grid">
-            {% for item in document.glossary %}
-            <article class="term-card"><div class="term-top"><h3>{{ item.term }}</h3><button type="button" class="time-chip seek-button" data-testid="glossary-{{ loop.index }}" data-seek="{{ item.start_sec }}" aria-label="{{ item.term }} {{ timestamp(item.start_sec) }}부터 재생">{{ timestamp(item.start_sec) }} ↗</button></div><p>{{ item.explanation }}</p></article>
-            {% endfor %}
-          </div>
-          {% else %}<p class="empty-glossary">이 강의에서 별도로 설명할 용어가 없습니다.</p>{% endif %}
-        </section>
-
-        <section class="transcript-section" aria-labelledby="transcript-title">
-          <div class="section-heading"><div><span class="section-kicker">FOLLOW ALONG</span><h2 id="transcript-title">정제 전사</h2></div><span class="section-rule"></span></div>
-          <div class="search-bar"><label for="transcript-search">전사 검색</label><div class="search-input-wrap"><span aria-hidden="true">⌕</span><input id="transcript-search" data-testid="transcript-search" type="search" placeholder="강의에서 나온 말을 검색하세요" autocomplete="off"></div><span id="search-count" data-testid="search-count">{{ document.segments|length }}개 구간</span></div>
-          <div class="transcript-list">
-            {% for segment in document.segments %}
-            <div class="transcript-row" data-transcript-row><button type="button" class="transcript-time seek-button" data-seek="{{ segment.start_sec }}" aria-label="{{ timestamp(segment.start_sec) }}부터 재생">{{ timestamp(segment.start_sec) }}</button><p>{{ segment.text }}</p></div>
-            {% endfor %}
-          </div>
-          <p id="search-empty" class="search-empty" hidden>검색 결과가 없습니다.</p>
-        </section>
-      </main>
-    </div>
-    <footer class="site-footer"><span>LECTURE / NOTES</span><span>원본 자막을 바탕으로 작성된 노트입니다. 중요한 내용은 영상을 확인하세요.</span></footer>
-  </div>
+  </main>
+  <footer class="site-footer">원본 자막을 바탕으로 작성된 노트입니다. 중요한 내용은 영상을 확인하세요.</footer>
+</div>
 </body>
 </html>

@@ -43,6 +43,12 @@ Deno.test("test_upload_once", async () => {
     if (calls[0].init.method !== "POST" || calls[0].init.body !== fixtureText) {
       throw new Error("Upload changed the document body");
     }
+    if (
+      (calls[0].init.headers as Record<string, string>)["X-Lecture-Listing"] !==
+        "public"
+    ) {
+      throw new Error("Upload did not opt in to the public catalog");
+    }
     if (result.share_url !== "https://notes.example/api/lectures/share-token") {
       throw new Error("Share URL was not returned");
     }
@@ -52,10 +58,14 @@ Deno.test("test_upload_once", async () => {
 Deno.test("test_retry_same_document", async () => {
   await withFixture(async (file) => {
     const bodies: string[] = [];
+    const listingHeaders: string[] = [];
     let attempts = 0;
     const result = await uploadLecture(file, "https://notes.example", {
       fetcher: async (_url, init) => {
         bodies.push(String(init?.body));
+        listingHeaders.push(
+          (init?.headers as Record<string, string>)["X-Lecture-Listing"],
+        );
         attempts++;
         return attempts === 1
           ? new Response("unavailable", { status: 503 })
@@ -66,9 +76,55 @@ Deno.test("test_retry_same_document", async () => {
     if (attempts !== 2 || bodies[0] !== bodies[1]) {
       throw new Error("Retry changed the request body");
     }
+    if (listingHeaders.some((value) => value !== "public")) {
+      throw new Error("Retry lost the public listing signal");
+    }
     const original = JSON.parse(fixtureText);
     if (JSON.parse(bodies[1]).run_id !== original.run_id || !result.share_url) {
       throw new Error("Retry changed the run ID");
+    }
+  });
+});
+
+Deno.test("test_missing_listing_confirmation", async () => {
+  await withFixture(async (file) => {
+    const oldResult = await uploadLecture(file, "https://notes.example", {
+      fetcher: async () => success(),
+    });
+    if ("listing_url" in oldResult) {
+      throw new Error("Old server response claimed public listing");
+    }
+    const confirmed = await uploadLecture(file, "https://notes.example", {
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            share_url: "https://notes.example/api/lectures/share-token",
+            expires_at: "2027-01-07T12:00:00Z",
+            listing_url: "https://notes.example/",
+          }),
+          { status: 201 },
+        ),
+    });
+    if (confirmed.listing_url !== "https://notes.example/") {
+      throw new Error("Listing URL was lost");
+    }
+    try {
+      await uploadLecture(file, "https://notes.example", {
+        fetcher: async () =>
+          new Response(
+            JSON.stringify({
+              share_url: "https://notes.example/api/lectures/share-token",
+              expires_at: "2027-01-07T12:00:00Z",
+              listing_url: "https://attacker.example/",
+            }),
+            { status: 201 },
+          ),
+      });
+      throw new Error("Cross-origin listing URL was accepted");
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("listing URL")) {
+        throw error;
+      }
     }
   });
 });
