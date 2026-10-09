@@ -201,3 +201,29 @@ Deno.test("test_no_korean_auto_caption", async () => {
     await Deno.remove(workDir, { recursive: true });
   }
 });
+
+Deno.test("test_missing_selected_english_download_reports_english", async () => {
+  const workDir = await Deno.makeTempDir({ prefix: "lecture-fetch-test-" });
+  try {
+    await fetchCaption(
+      ID,
+      workDir,
+      { deno: "deno", ytdlp: "yt-dlp" },
+      async (_command, args) => ({
+        code: 0,
+        stdout: args.includes("--dump-single-json")
+          ? JSON.stringify(englishInfo())
+          : "",
+        stderr: "",
+      }),
+      "en",
+    );
+    throw new Error("Expected missing English caption failure");
+  } catch (error) {
+    if (
+      !(error instanceof CaptionUnavailable) || !error.message.includes("영어")
+    ) throw error;
+  } finally {
+    await Deno.remove(workDir, { recursive: true });
+  }
+});

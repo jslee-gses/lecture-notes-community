@@ -368,6 +368,55 @@ Deno.test("test_mismatched_resume_source", async () => {
   }
 });
 
+Deno.test("test_resume_english_after_caption_before_manifest", async () => {
+  const runDir = await Deno.makeTempDir();
+  try {
+    const videoId = "zizonToFXDs";
+    await Deno.writeTextFile(
+      `${runDir}/${videoId}.info.json`,
+      JSON.stringify({
+        id: videoId,
+        title: "Introduction to large language models",
+        duration: 946,
+        language: "en-US",
+        subtitles: { "en-US": [{ ext: "json3" }] },
+        automatic_captions: { "en-orig": [{ ext: "json3" }] },
+      }),
+    );
+    await Deno.writeTextFile(
+      `${runDir}/${videoId}.en-US.json3`,
+      JSON.stringify({
+        events: [{ tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: "Hello" }] }],
+      }),
+    );
+    const source = await fetchRun(
+      `https://www.youtube.com/watch?v=${videoId}`,
+      runDir,
+      `${runDir}/missing-tools`,
+      "en",
+    );
+    if (
+      source.schema_version !== "2.0" ||
+      source.caption_file !== `${videoId}.en-US.json3` ||
+      source.lecture.caption_source !== "manual"
+    ) {
+      throw new Error("English caption was not recovered from saved metadata");
+    }
+    await prepareRun(runDir);
+    const repeat = await fetchRun(
+      `https://www.youtube.com/watch?v=${videoId}`,
+      runDir,
+      `${runDir}/missing-tools`,
+      "auto",
+    );
+    if (JSON.stringify(source) !== JSON.stringify(repeat)) {
+      throw new Error("Recovered source changed");
+    }
+  } finally {
+    await Deno.remove(runDir, { recursive: true });
+  }
+});
+
 const englishFixture = JSON.parse(
   await Deno.readTextFile(
     new URL("./fixtures/valid-english-lecture.json", import.meta.url),

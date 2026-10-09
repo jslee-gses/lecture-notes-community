@@ -74,6 +74,11 @@ export function parseVtt(raw: string): Segment[] {
     if (previous && start < previous.start_sec) {
       throw new CaptionDataError(`/vtt/${blockIndex}`, "cues out of order");
     }
+    if (previous && start === previous.start_sec) {
+      previous.text = `${previous.text} ${spoken}`;
+      previous.end_sec = Math.max(previous.end_sec, end);
+      continue;
+    }
     if (previous && start < previous.end_sec) previous.end_sec = start;
     segments.push({
       idx: segments.length + 1,

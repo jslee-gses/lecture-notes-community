@@ -339,7 +339,9 @@ export async function fetchCaption(
       result.stderr.trim().slice(-500) || `yt-dlp exited with ${result.code}`,
     );
   }
-  if (!await existsNonempty(captionPath)) throw new CaptionUnavailable(videoId);
+  if (!await existsNonempty(captionPath)) {
+    throw new CaptionUnavailable(videoId, track.language);
+  }
   await Deno.writeTextFile(infoPath, JSON.stringify(info));
   return { captionPath, infoPath, track };
 }

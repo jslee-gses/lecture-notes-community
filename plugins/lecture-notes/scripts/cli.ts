@@ -5,7 +5,12 @@ import {
   type Correction,
   type EnglishAssemblyInputs,
 } from "./assemble.ts";
-import { fetchCaption, parseJson3 } from "./captions.ts";
+import {
+  type CaptionTrack,
+  fetchCaption,
+  parseJson3,
+  selectCaptionTrack,
+} from "./captions.ts";
 import { type Chunk, chunkSegments } from "./chunk.ts";
 import type {
   EnglishLectureDocument,
@@ -139,10 +144,21 @@ export async function fetchRun(
       "/source/lecture/caption_language: run directory belongs to another language",
     );
   }
-  const captionName = existing?.caption_file ?? `${videoId}.ko.json3`;
+  const info = await Deno.stat(infoPath).catch(() => null);
+  let recoveredTrack: CaptionTrack | undefined;
+  if (!existing && info?.isFile && info.size > 0) {
+    const savedMetadata = await readJson(infoPath);
+    if (!isObject(savedMetadata) || savedMetadata.id !== videoId) {
+      throw new Error(`${infoPath}: metadata ID does not match URL`);
+    }
+    recoveredTrack = selectCaptionTrack(savedMetadata, requestedLanguage);
+  }
+  const captionName = existing?.caption_file ??
+    (recoveredTrack
+      ? `${videoId}.${recoveredTrack.tag}.${recoveredTrack.format}`
+      : `${videoId}.ko.json3`);
   const captionPath = path(runDir, captionName);
   const caption = await Deno.stat(captionPath).catch(() => null);
-  const info = await Deno.stat(infoPath).catch(() => null);
   let fetched: Awaited<ReturnType<typeof fetchCaption>> | undefined;
   if (!caption && !info) {
     if (existing) {
@@ -188,28 +204,29 @@ export async function fetchRun(
     duration_sec: metadata.duration as number,
     created_at: new Date().toISOString(),
   };
-  const source: Source = existing ?? (fetched?.track.language === "en"
+  const selectedTrack = fetched?.track ?? recoveredTrack;
+  const source: Source = existing ?? (selectedTrack?.language === "en"
     ? {
       schema_version: "2.0",
       run_id: crypto.randomUUID(),
       lecture: {
         ...shared,
         caption_language: "en",
-        caption_source: fetched.track.source,
+        caption_source: selectedTrack.source,
         translation_language: "ko",
       },
-      caption_format: fetched.track.format,
-      caption_tag: fetched.track.tag,
-      caption_file: `${videoId}.${fetched.track.tag}.${fetched.track.format}`,
+      caption_format: selectedTrack.format,
+      caption_tag: selectedTrack.tag,
+      caption_file: `${videoId}.${selectedTrack.tag}.${selectedTrack.format}`,
     }
     : {
       schema_version: "1.0",
       run_id: crypto.randomUUID(),
       lecture: { ...shared, caption_language: "ko", caption_source: "auto" },
-      caption_format: fetched?.track.format,
-      caption_tag: fetched?.track.tag,
-      caption_file: fetched
-        ? `${videoId}.${fetched.track.tag}.${fetched.track.format}`
+      caption_format: selectedTrack?.format,
+      caption_tag: selectedTrack?.tag,
+      caption_file: selectedTrack
+        ? `${videoId}.${selectedTrack.tag}.${selectedTrack.format}`
         : undefined,
     });
   await writeOnce(path(runDir, "source.json"), source);

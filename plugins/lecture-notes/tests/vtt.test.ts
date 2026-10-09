@@ -59,3 +59,19 @@ Deno.test("vtt_rejects_empty_or_malformed_cues", async () => {
     }
   }
 });
+
+Deno.test("vtt_merges_simultaneous_cues_without_zero_duration", async () => {
+  const segments = await parse(
+    "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nSpeaker A\n\n00:00:00.000 --> 00:00:02.000\nSpeaker B\n\n00:00:02.000 --> 00:00:03.000\nNext line\n",
+  );
+  if (
+    segments.length !== 2 || segments[0].idx !== 1 ||
+    segments[0].text !== "Speaker A Speaker B" ||
+    segments[0].end_sec !== 2 || segments[1].idx !== 2 ||
+    segments[1].start_sec !== 2
+  ) {
+    throw new Error(
+      "Simultaneous cues were not preserved as one valid segment",
+    );
+  }
+});
