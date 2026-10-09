@@ -67,7 +67,10 @@ export async function uploadLecture(
     try {
       response = await fetcher(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Lecture-Listing": "public" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Lecture-Listing": "public",
+        },
         body,
       });
     } catch (error) {
@@ -133,7 +136,9 @@ export async function uploadLecture(
       !Number.isFinite(Date.parse(value.expires_at))
     ) throw new Error("server returned an invalid share URL or expiry");
     if (value.listing_url !== undefined) {
-      if (typeof value.listing_url !== "string") throw new Error("server returned an invalid listing URL");
+      if (typeof value.listing_url !== "string") {
+        throw new Error("server returned an invalid listing URL");
+      }
       let listing: URL;
       try {
         listing = new URL(value.listing_url);
@@ -142,7 +147,8 @@ export async function uploadLecture(
       }
       if (
         listing.origin !== endpoint.origin || listing.pathname !== "/" ||
-        listing.search || listing.hash || listing.username || listing.password ||
+        listing.search || listing.hash || listing.username ||
+        listing.password ||
         (endpoint.protocol === "https:" && listing.protocol !== "https:")
       ) throw new Error("server returned an invalid listing URL");
     }

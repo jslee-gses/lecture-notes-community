@@ -114,7 +114,7 @@ class Repository:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """SELECT share_token, document #>> '{lecture,title}' AS title,
-                              (document #>> '{lecture,duration_sec}')::integer AS duration_sec, created_at
+                              (document #>> '{lecture,duration_sec}')::numeric::integer AS duration_sec, created_at
                        FROM lectures
                        WHERE is_listed AND expires_at > %s
                        ORDER BY created_at DESC, run_id DESC
@@ -219,7 +219,7 @@ class MemoryRepository:
             selected = rows[offset:offset + page_size + 1]
             return [
                 PublicLecture(row.share_token, row.document["lecture"]["title"],
-                              row.document["lecture"]["duration_sec"], row.created_at)
+                              int(row.document["lecture"]["duration_sec"]), row.created_at)
                 for row in selected[:page_size]
             ], len(selected) > page_size
 

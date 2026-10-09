@@ -70,6 +70,8 @@ def test_public_query_order_and_page_size(database):
         now[0] += timedelta(seconds=1)
         entry = document()
         entry["lecture"]["title"] = f"Public {number}"
+        if number == 20:
+            entry["lecture"]["duration_sec"] = float(entry["lecture"]["duration_sec"])
         expected.append(repository.insert_or_get(entry, "a" * 64, is_listed=True))
     repository.insert_or_get(document(), "a" * 64)
     now[0] += timedelta(seconds=1)
