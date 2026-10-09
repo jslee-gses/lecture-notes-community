@@ -255,3 +255,114 @@ Deno.test("test_prepare_clamps_small_caption_tail_only", async () => {
     }
   }
 });
+
+Deno.test("test_english_fetch_prepare_resume", async () => {
+  const runDir = await Deno.makeTempDir();
+  try {
+    const videoId = "zizonToFXDs";
+    const lecture = {
+      video_id: videoId,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      title: "Introduction to large language models",
+      duration_sec: 946,
+      caption_language: "en",
+      caption_source: "manual",
+      translation_language: "ko",
+      created_at: "2026-10-10T00:00:00Z",
+    };
+    const source = {
+      schema_version: "2.0",
+      run_id: crypto.randomUUID(),
+      lecture,
+      caption_format: "vtt",
+      caption_tag: "en-US",
+      caption_file: `${videoId}.en-US.vtt`,
+    };
+    await Deno.writeTextFile(`${runDir}/source.json`, JSON.stringify(source));
+    await Deno.writeTextFile(
+      `${runDir}/${source.caption_file}`,
+      "WEBVTT\n\n00:00:00.500 --> 00:00:02.000\nHello world\n\n00:00:02.000 --> 00:00:03.000\nA language model\n",
+    );
+    await Deno.writeTextFile(
+      `${runDir}/${videoId}.info.json`,
+      JSON.stringify({
+        id: videoId,
+        title: lecture.title,
+        duration: 946,
+        language: "en-US",
+      }),
+    );
+    const first = await fetchRun(
+      lecture.url,
+      runDir,
+      `${runDir}/missing-tools`,
+      "en",
+    );
+    const chunks = await prepareRun(runDir);
+    const second = await fetchRun(
+      lecture.url,
+      runDir,
+      `${runDir}/missing-tools`,
+      "auto",
+    );
+    await prepareRun(runDir);
+    const segments = JSON.parse(
+      await Deno.readTextFile(`${runDir}/segments.json`),
+    );
+    if (
+      JSON.stringify(first) !== JSON.stringify(second) ||
+      first.schema_version !== "2.0"
+    ) throw new Error("English resume changed saved source");
+    if (
+      chunks.length !== 1 || segments.length !== 2 || segments[0].idx !== 1 ||
+      segments[1].start_sec !== 2
+    ) throw new Error("English VTT was not prepared");
+    const files = [...Deno.readDirSync(runDir)].map((entry) => entry.name);
+    if (files.some((name) => /\.(mp4|webm|mkv)$/iu.test(name))) {
+      throw new Error("Video was downloaded");
+    }
+  } finally {
+    await Deno.remove(runDir, { recursive: true });
+  }
+});
+
+Deno.test("test_mismatched_resume_source", async () => {
+  const runDir = await Deno.makeTempDir();
+  try {
+    const videoId = fixture.lecture.video_id;
+    await Deno.writeTextFile(
+      `${runDir}/source.json`,
+      JSON.stringify({
+        schema_version: "1.0",
+        run_id: fixture.run_id,
+        lecture: fixture.lecture,
+      }),
+    );
+    await Deno.writeTextFile(`${runDir}/${videoId}.ko.json3`, "{}");
+    await Deno.writeTextFile(
+      `${runDir}/${videoId}.info.json`,
+      JSON.stringify({
+        id: videoId,
+        title: fixture.lecture.title,
+        duration: fixture.lecture.duration_sec,
+      }),
+    );
+    for (
+      const [url, requested] of [[fixture.lecture.url, "en"], [
+        "https://www.youtube.com/watch?v=zizonToFXDs",
+        "ko",
+      ]] as const
+    ) {
+      try {
+        await fetchRun(url, runDir, `${runDir}/missing-tools`, requested);
+        throw new Error("Mismatched resume was accepted");
+      } catch (error) {
+        if (
+          !(error instanceof Error) || !error.message.includes("run directory")
+        ) throw error;
+      }
+    }
+  } finally {
+    await Deno.remove(runDir, { recursive: true });
+  }
+});
