@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>강의 목록 · Lecture Notes</title>
+  <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='/catalog.css') }}">
+</head>
+<body>
+  <main class="catalog-shell">
+    <header class="catalog-header">
+      <span class="brand">Lecture Notes</span>
+      <h1>강의 목록</h1>
+      <p>공개된 강의를 선택해 영상과 목차, 요약, 용어집을 살펴보세요.</p>
+    </header>
+    {% if lectures %}
+    <div class="lecture-grid">
+      {% for lecture in lectures %}
+      <a class="lecture-card" href="/api/lectures/{{ lecture.share_token }}">
+        <span class="card-meta">{{ timestamp(lecture.duration_sec) }} · {{ lecture.created_at.strftime('%Y-%m-%d') }}</span>
+        <h2>{{ lecture.title }}</h2>
+        <span class="card-action">강의 보기 <span aria-hidden="true">↗</span></span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">등록된 강의가 없습니다.</div>
+    {% endif %}
+    <nav class="pagination" aria-label="목록 페이지">
+      {% if page > 1 %}<a href="/?page={{ page - 1 }}">이전</a>{% endif %}
+      <span>{{ page }}페이지</span>
+      {% if has_next %}<a href="/?page={{ page + 1 }}">다음</a>{% endif %}
+    </nav>
+  </main>
+</body>
+</html>

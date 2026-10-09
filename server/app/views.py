@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
@@ -35,6 +35,15 @@ def viewer_router(repository) -> APIRouter:
         if not isinstance(video_id, str) or not VIDEO_ID.fullmatch(video_id):
             raise HTTPException(status_code=404, detail="Lecture not found")
         return saved
+
+    @router.get("/", response_class=HTMLResponse)
+    def catalog(request: Request, page: int = Query(1, ge=1, le=1000)):
+        lectures, has_next = repository.list_public(page, 20)
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="catalog.html",
+            context={"lectures": lectures, "page": page, "has_next": has_next, "timestamp": timestamp},
+        )
 
     @router.get("/api/lectures", include_in_schema=False)
     def no_listing():
