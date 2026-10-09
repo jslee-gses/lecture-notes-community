@@ -20,7 +20,16 @@ UPLOAD_ADVISORY_LOCK = 792436152843
 
 
 def canonical_hash(doc: dict) -> str:
-    payload = json.dumps(doc, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    def normalize(value):
+        if isinstance(value, dict):
+            return {key: normalize(child) for key, child in value.items()}
+        if isinstance(value, list):
+            return [normalize(child) for child in value]
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
+
+    payload = json.dumps(normalize(doc), sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -59,7 +68,7 @@ class Repository:
                 cursor.execute("SELECT * FROM lectures WHERE run_id = %s", (doc["run_id"],))
                 existing = cursor.fetchone()
                 if existing:
-                    if existing["body_hash"] != body_hash:
+                    if existing["body_hash"] != body_hash and canonical_hash(existing["document"]) != body_hash:
                         raise RunIdConflict("run_id already belongs to different content")
                     return self._saved(existing).as_existing()
                 if not self.uploads_enabled:
@@ -148,7 +157,7 @@ class MemoryRepository:
         with self._lock:
             existing = self._by_run_id.get(doc["run_id"])
             if existing:
-                if existing.body_hash != body_hash:
+                if existing.body_hash != body_hash and canonical_hash(existing.document) != body_hash:
                     raise RunIdConflict("run_id already belongs to different content")
                 return existing.as_existing()
             if not self.uploads_enabled:

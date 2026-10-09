@@ -1,6 +1,7 @@
 """Repository contract against a real PostgreSQL instance in CI."""
 
 import copy
+import hashlib
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -10,6 +11,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
 from server.app.migrate import apply_migrations
 from server.app.models import RunIdConflict
@@ -55,6 +57,15 @@ def test_idempotence_conflict_and_expiry(database):
     again = repository.insert_or_get(lecture, "a" * 64)
     assert not again.created
     assert again.share_token == first.share_token
+    equivalent = copy.deepcopy(lecture)
+    equivalent["lecture"]["duration_sec"] = float(equivalent["lecture"]["duration_sec"])
+    assert repository.insert_or_get(equivalent, "a" * 64).share_token == first.share_token
+    legacy_payload = json.dumps(equivalent, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    legacy_hash = hashlib.sha256(legacy_payload.encode("utf-8")).hexdigest()
+    with psycopg.connect(database) as connection:
+        connection.execute("UPDATE lectures SET body_hash = %s, document = %s WHERE run_id = %s", (legacy_hash, Jsonb(equivalent), lecture["run_id"]))
+    assert repository.insert_or_get(equivalent, "a" * 64).share_token == first.share_token
+    assert repository.insert_or_get(lecture, "a" * 64).share_token == first.share_token
     changed = copy.deepcopy(lecture)
     changed["lecture"]["title"] = "다른 강의"
     with pytest.raises(RunIdConflict):

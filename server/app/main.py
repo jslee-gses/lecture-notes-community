@@ -24,6 +24,10 @@ from .views import viewer_router
 LOGGER = logging.getLogger(__name__)
 
 
+def _reject_json_constant(value: str):
+    raise ValueError(f"non-finite JSON number: {value}")
+
+
 @dataclass(frozen=True)
 class Settings:
     public_base_url: str = ""
@@ -95,7 +99,7 @@ def create_app(settings: Settings | None = None, repository=None, clock: Callabl
                 return JSONResponse(status_code=413, content={"detail": "JSON upload exceeds size limit"})
             payload.extend(chunk)
         try:
-            document = json.loads(payload)
+            document = json.loads(payload, parse_constant=_reject_json_constant)
             validate_document(document)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
             return JSONResponse(status_code=422, content={"detail": str(error)})

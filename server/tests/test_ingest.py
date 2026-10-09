@@ -1,5 +1,7 @@
 import copy
+import hashlib
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -85,6 +87,66 @@ def test_idempotent_retry(service):
     assert first.json()["share_url"] == second.json()["share_url"]
     assert repository.saved_count == 3
     assert repository.quota_count == 3
+
+
+def test_integral_float_references_are_valid(service):
+    client, repository, _ = service()
+    doc = document()
+    chapter = doc["outline"]["chapters"][0]
+    chapter["start_idx"] = float(chapter["start_idx"])
+    chapter["end_idx"] = float(chapter["end_idx"])
+    chapter["children"][0]["start_idx"] = float(chapter["children"][0]["start_idx"])
+    chapter["children"][0]["end_idx"] = float(chapter["children"][0]["end_idx"])
+    point = doc["summary_note"]["key_points"][0]
+    point["segment_idxs"][0] = float(point["segment_idxs"][0])
+    doc["glossary"][0]["first_segment_idx"] = float(doc["glossary"][0]["first_segment_idx"])
+    response = upload(client, doc)
+    assert response.status_code == 201
+    assert repository.saved_count == 1
+
+
+def test_numeric_equivalent_retry_does_not_use_quota(service):
+    client, repository, _ = service(QuotaLimits(per_hour=1, per_day=1, global_day=1))
+    doc = document()
+    first = upload(client, doc)
+    equivalent = copy.deepcopy(doc)
+    equivalent["lecture"]["duration_sec"] = float(equivalent["lecture"]["duration_sec"])
+    second = upload(client, equivalent)
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert first.json()["share_url"] == second.json()["share_url"]
+    assert repository.saved_count == 1
+
+
+def test_retry_of_preexisting_float_document(service):
+    client, repository, _ = service(QuotaLimits(per_hour=1, per_day=1, global_day=1))
+    doc = document()
+    doc["lecture"]["duration_sec"] = float(doc["lecture"]["duration_sec"])
+    first = upload(client, doc)
+    assert first.status_code == 201
+    legacy_payload = json.dumps(doc, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    legacy_hash = hashlib.sha256(legacy_payload.encode("utf-8")).hexdigest()
+    repository._by_run_id[doc["run_id"]] = replace(repository._by_run_id[doc["run_id"]], body_hash=legacy_hash)
+    retry = upload(client, doc)
+    assert retry.status_code == 200
+    assert retry.json()["share_url"] == first.json()["share_url"]
+    equivalent = copy.deepcopy(doc)
+    equivalent["lecture"]["duration_sec"] = int(equivalent["lecture"]["duration_sec"])
+    assert upload(client, equivalent).status_code == 200
+    assert repository.saved_count == 1
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e400"])
+def test_nonfinite_json_number_is_rejected(service, value):
+    client, repository, _ = service()
+    doc = document()
+    payload = json.dumps(doc)
+    duration = f'"duration_sec": {doc["lecture"]["duration_sec"]}'
+    assert duration in payload
+    payload = payload.replace(duration, f'"duration_sec": {value}', 1)
+    response = client.post("/api/lectures", content=payload, headers={"Content-Type": "application/json"})
+    assert response.status_code == 422
+    assert repository.saved_count == 0
 
 
 def test_run_id_conflict(service):

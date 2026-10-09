@@ -1,6 +1,7 @@
 """Shared lecture JSON contract and cross-reference checks."""
 
 import json
+import math
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -16,9 +17,20 @@ def _fail(path: str, detail: str) -> None:
     raise ValueError(f"{path}: {detail}")
 
 
+def _check_finite(value, path: str = "") -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        _fail(path or "/", "number must be finite")
+    if isinstance(value, dict):
+        for key, child in value.items():
+            _check_finite(child, f"{path}/{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _check_finite(child, f"{path}/{index}")
+
+
 def _check_range(item: dict, path: str, segments: list[dict]) -> None:
-    start_idx = item["start_idx"]
-    end_idx = item["end_idx"]
+    start_idx = int(item["start_idx"])
+    end_idx = int(item["end_idx"])
     if start_idx > end_idx or end_idx > len(segments):
         _fail(f"{path}/end_idx", "invalid segment range")
     if item["start_sec"] != segments[start_idx - 1]["start_sec"]:
@@ -29,6 +41,7 @@ def _check_range(item: dict, path: str, segments: list[dict]) -> None:
 
 def validate_document(doc: dict) -> None:
     """Raise a JSON-pointer-like ValueError for invalid shared documents."""
+    _check_finite(doc)
     errors = sorted(VALIDATOR.iter_errors(doc), key=lambda error: (list(map(str, error.path)), error.message))
     if errors:
         error = errors[0]
@@ -82,11 +95,11 @@ def validate_document(doc: dict) -> None:
             if idx <= previous_idx or idx > len(segments):
                 _fail(f"{path}/segment_idxs/{ref_number}", "invalid or unordered reference")
             previous_idx = idx
-        if point["start_sec"] != segments[point["segment_idxs"][0] - 1]["start_sec"]:
+        if point["start_sec"] != segments[int(point["segment_idxs"][0]) - 1]["start_sec"]:
             _fail(f"{path}/start_sec", "must match first referenced segment")
     for term_number, term in enumerate(doc["glossary"]):
         path = f"/glossary/{term_number}"
         if term["first_segment_idx"] > len(segments):
             _fail(f"{path}/first_segment_idx", "missing segment")
-        if term["start_sec"] != segments[term["first_segment_idx"] - 1]["start_sec"]:
+        if term["start_sec"] != segments[int(term["first_segment_idx"]) - 1]["start_sec"]:
             _fail(f"{path}/start_sec", "must match referenced segment")
