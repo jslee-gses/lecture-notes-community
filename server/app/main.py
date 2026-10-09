@@ -2,17 +2,26 @@
 
 import json
 import os
+import asyncio
+import logging
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from .contract import validate_document
 from .models import RunIdConflict, UploadsDisabled
 from .rate_limit import QuotaExceeded, QuotaLimits, client_key, resolve_client_ip
 from .repository import Repository
+from .views import viewer_router
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -24,6 +33,7 @@ class Settings:
     max_body_bytes: int = 10 * 1024 * 1024
     limits: QuotaLimits = QuotaLimits()
     uploads_enabled: bool = True
+    cleanup_interval_seconds: int = 3600
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -39,6 +49,7 @@ class Settings:
                 global_day=int(os.getenv("UPLOADS_PER_DAY_GLOBAL", "200")),
             ),
             uploads_enabled=os.getenv("UPLOADS_ENABLED", "true").lower() in ("true", "1", "yes"),
+            cleanup_interval_seconds=int(os.getenv("EXPIRY_SWEEP_SECONDS", "3600")),
         )
 
 
@@ -46,7 +57,29 @@ def create_app(settings: Settings | None = None, repository=None, clock: Callabl
     settings = settings or Settings.from_env()
     clock = clock or (lambda: datetime.now(timezone.utc))
     repository = repository or Repository(settings.database_url, settings.limits, settings.uploads_enabled, clock)
-    app = FastAPI(title="Lecture Notes")
+    if settings.cleanup_interval_seconds < 1:
+        raise ValueError("EXPIRY_SWEEP_SECONDS must be positive")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        async def sweep_expired():
+            while True:
+                try:
+                    await asyncio.to_thread(repository.delete_expired, clock())
+                except Exception:
+                    LOGGER.exception("Expired lecture cleanup failed")
+                await asyncio.sleep(settings.cleanup_interval_seconds)
+
+        task = asyncio.create_task(sweep_expired())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    app = FastAPI(title="Lecture Notes", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
 
     @app.post("/api/lectures")
     async def upload_lecture(request: Request):
@@ -88,6 +121,7 @@ def create_app(settings: Settings | None = None, repository=None, clock: Callabl
             },
         )
 
+    app.include_router(viewer_router(repository))
     return app
 
 
