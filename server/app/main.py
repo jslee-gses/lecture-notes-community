@@ -90,6 +90,10 @@ def create_app(settings: Settings | None = None, repository=None, clock: Callabl
         if not settings.public_base_url.startswith("https://") or not settings.ip_hash_secret or not settings.database_url and isinstance(repository, Repository):
             return JSONResponse(status_code=503, content={"detail": "server is not configured"})
 
+        listing_header = request.headers.get("x-lecture-listing")
+        if listing_header is not None and listing_header != "public":
+            return JSONResponse(status_code=422, content={"detail": "X-Lecture-Listing must be public when present"})
+
         content_length = request.headers.get("content-length")
         if content_length and content_length.isdecimal() and int(content_length) > settings.max_body_bytes:
             return JSONResponse(status_code=413, content={"detail": "JSON upload exceeds size limit"})
@@ -110,20 +114,20 @@ def create_app(settings: Settings | None = None, repository=None, clock: Callabl
         current_key = client_key(ip, settings.ip_hash_secret, now.date())
         previous_key = client_key(ip, settings.ip_hash_secret, (now - timedelta(days=1)).date())
         try:
-            saved = repository.insert_or_get(document, current_key, previous_key)
+            saved = repository.insert_or_get(document, current_key, previous_key, is_listed=listing_header == "public")
         except RunIdConflict as error:
             return JSONResponse(status_code=409, content={"detail": str(error)})
         except QuotaExceeded as error:
             return JSONResponse(status_code=429, content={"detail": str(error)}, headers={"Retry-After": str(error.retry_after)})
         except UploadsDisabled as error:
             return JSONResponse(status_code=503, content={"detail": str(error)})
-        return JSONResponse(
-            status_code=201 if saved.created else 200,
-            content={
-                "share_url": f"{settings.public_base_url.rstrip('/')}/api/lectures/{saved.share_token}",
-                "expires_at": saved.expires_at.isoformat(),
-            },
-        )
+        response = {
+            "share_url": f"{settings.public_base_url.rstrip('/')}/api/lectures/{saved.share_token}",
+            "expires_at": saved.expires_at.isoformat(),
+        }
+        if saved.is_listed:
+            response["listing_url"] = f"{settings.public_base_url.rstrip('/')}/"
+        return JSONResponse(status_code=201 if saved.created else 200, content=response)
 
     app.include_router(viewer_router(repository))
     return app

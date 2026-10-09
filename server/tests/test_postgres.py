@@ -86,6 +86,20 @@ def test_public_query_order_and_page_size(database):
     assert last_has_next is False
 
 
+def test_public_visibility_is_immutable_on_retry(database):
+    repository = Repository(database, limits=QuotaLimits(per_hour=2, per_day=2, global_day=2))
+    private = document()
+    public = document()
+    first_private = repository.insert_or_get(private, "a" * 64)
+    first_public = repository.insert_or_get(public, "a" * 64, is_listed=True)
+    assert repository.insert_or_get(private, "a" * 64, is_listed=True).is_listed is False
+    assert repository.insert_or_get(public, "a" * 64).is_listed is True
+    assert repository.list_public(1)[0][0].share_token == first_public.share_token
+    with psycopg.connect(database) as connection:
+        assert connection.execute("SELECT count(*) FROM lectures").fetchone()[0] == 2
+        assert connection.execute("SELECT is_listed FROM lectures WHERE run_id = %s", (first_private.run_id,)).fetchone()[0] is False
+
+
 def test_idempotence_conflict_and_expiry(database):
     now = [datetime(2026, 10, 9, 12, tzinfo=timezone.utc)]
     repository = Repository(database, clock=lambda: now[0])

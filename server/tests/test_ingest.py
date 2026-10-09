@@ -80,6 +80,46 @@ def test_public_query_order_and_page_size_memory():
     assert last_has_next is False
 
 
+def test_public_upload_returns_listing_url(service):
+    client, repository, _ = service()
+    response = upload(client, headers={"X-Lecture-Listing": "public"})
+    assert response.status_code == 201
+    assert response.json()["listing_url"] == "https://notes.example/"
+    assert repository.list_public(1)[0][0].share_token == response.json()["share_url"].rsplit("/", 1)[-1]
+
+
+def test_old_client_upload_stays_unlisted(service):
+    client, repository, _ = service()
+    response = upload(client)
+    assert response.status_code == 201
+    assert "listing_url" not in response.json()
+    assert repository.list_public(1) == ([], False)
+
+
+def test_retry_cannot_change_listing(service):
+    client, repository, _ = service()
+    private_doc = document()
+    private_first = upload(client, private_doc)
+    private_retry = upload(client, private_doc, headers={"X-Lecture-Listing": "public"})
+    assert private_retry.status_code == 200
+    assert private_retry.json() == private_first.json()
+    public_doc = document()
+    public_first = upload(client, public_doc, headers={"X-Lecture-Listing": "public"})
+    public_retry = upload(client, public_doc)
+    assert public_retry.status_code == 200
+    assert public_retry.json() == public_first.json()
+    assert repository.saved_count == repository.quota_count == 2
+    assert [item.share_token for item in repository.list_public(1)[0]] == [public_first.json()["share_url"].rsplit("/", 1)[-1]]
+
+
+@pytest.mark.parametrize("header", ["", "private", "PUBLIC"])
+def test_bad_listing_header(service, header):
+    client, repository, _ = service()
+    response = upload(client, headers={"X-Lecture-Listing": header})
+    assert response.status_code == 422
+    assert repository.saved_count == 0
+
+
 def test_too_large(service):
     client, repository, _ = service()
     response = client.post("/api/lectures", content=b"x" * (10 * 1024 * 1024 + 1))
