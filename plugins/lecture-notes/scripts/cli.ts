@@ -151,7 +151,26 @@ export async function fetchRun(
     if (!isObject(savedMetadata) || savedMetadata.id !== videoId) {
       throw new Error(`${infoPath}: metadata ID does not match URL`);
     }
-    recoveredTrack = selectCaptionTrack(savedMetadata, requestedLanguage);
+    const legacyCaption = await Deno.stat(path(runDir, `${videoId}.ko.json3`))
+      .catch(() => null);
+    const noNativeLanguage = !savedMetadata.language &&
+      !savedMetadata.original_language;
+    const noTrackInventory = !savedMetadata.subtitles &&
+      !savedMetadata.automatic_captions;
+    // Older Korean runs saved the selected auto subtitle before their manifest.
+    if (
+      requestedLanguage !== "en" && noNativeLanguage && noTrackInventory &&
+      legacyCaption?.isFile && legacyCaption.size > 0
+    ) {
+      recoveredTrack = {
+        language: "ko",
+        source: "auto",
+        format: "json3",
+        tag: "ko",
+      };
+    } else {
+      recoveredTrack = selectCaptionTrack(savedMetadata, requestedLanguage);
+    }
   }
   const captionName = existing?.caption_file ??
     (recoveredTrack

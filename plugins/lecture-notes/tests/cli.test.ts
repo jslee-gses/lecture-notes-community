@@ -417,6 +417,73 @@ Deno.test("test_resume_english_after_caption_before_manifest", async () => {
   }
 });
 
+Deno.test("test_resume_legacy_korean_before_manifest", async () => {
+  const runDir = await Deno.makeTempDir();
+  try {
+    const videoId = fixture.lecture.video_id;
+    await Deno.writeTextFile(
+      `${runDir}/${videoId}.info.json`,
+      JSON.stringify({
+        id: videoId,
+        title: fixture.lecture.title,
+        duration: fixture.lecture.duration_sec,
+      }),
+    );
+    await Deno.writeTextFile(
+      `${runDir}/${videoId}.ko.json3`,
+      JSON.stringify({
+        events: [{ tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: "강의" }] }],
+      }),
+    );
+    const source = await fetchRun(
+      fixture.lecture.url,
+      runDir,
+      `${runDir}/missing-tools`,
+    );
+    if (
+      source.schema_version !== "1.0" ||
+      source.lecture.caption_language !== "ko"
+    ) {
+      throw new Error("Interrupted legacy Korean run was not recovered");
+    }
+    await prepareRun(runDir);
+  } finally {
+    await Deno.remove(runDir, { recursive: true });
+  }
+});
+
+Deno.test("test_legacy_resume_does_not_override_english_native_language", async () => {
+  const runDir = await Deno.makeTempDir();
+  try {
+    const videoId = fixture.lecture.video_id;
+    await Deno.writeTextFile(
+      `${runDir}/${videoId}.info.json`,
+      JSON.stringify({
+        id: videoId,
+        title: fixture.lecture.title,
+        duration: fixture.lecture.duration_sec,
+        language: "en-US",
+      }),
+    );
+    await Deno.writeTextFile(`${runDir}/${videoId}.ko.json3`, "{}");
+    try {
+      await fetchRun(fixture.lecture.url, runDir, `${runDir}/missing-tools`);
+      throw new Error(
+        "Translated Korean track was accepted as a legacy original",
+      );
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== "CaptionUnavailable") {
+        throw error;
+      }
+    }
+    if (await Deno.stat(`${runDir}/source.json`).catch(() => null)) {
+      throw new Error("Rejected source was saved");
+    }
+  } finally {
+    await Deno.remove(runDir, { recursive: true });
+  }
+});
+
 const englishFixture = JSON.parse(
   await Deno.readTextFile(
     new URL("./fixtures/valid-english-lecture.json", import.meta.url),
