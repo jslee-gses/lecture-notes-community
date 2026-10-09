@@ -12,6 +12,7 @@
 
 ## Global Constraints
 
+- After each numbered task, show the user the changed files, a concise diff summary, and verification results. Wait for explicit approval before starting the next task.
 - First release: Windows Codex desktop, Korean auto-generated captions, lectures up to 3 hours.
 - Development and CI have Deno 2.3+, Python 3.12+, and pytest available; end users get the portable tools through Task 3's bootstrap.
 - No user account, service API key, admin install, video download/edit, audio transcription, or web URL submission.
@@ -32,7 +33,7 @@
 ## File Map
 
 - `plugins/lecture-notes/plugin.json`: portable plugin identity and Codex listing metadata.
-- `plugins/lecture-notes/skills/lecture-notes/SKILL.md`: orchestration and bounded judgment prompts.
+- `plugins/lecture-notes/skills/lecture-notes/SKILL.md`: whole-lecture context pass, grounded correction, and bounded judgment prompts.
 - `plugins/lecture-notes/schema/lecture.schema.json`: one source of truth for client and server.
 - `plugins/lecture-notes/deno.json`: pinned local script dependencies and permissions.
 - `plugins/lecture-notes/tools/bootstrap.ps1`, `tools.lock.json`: Windows tool discovery, verified portable downloads.
@@ -98,11 +99,11 @@
 
 **Files:** Create `plugins/lecture-notes/skills/lecture-notes/SKILL.md`, `plugins/lecture-notes/scripts/assemble.ts`, `plugins/lecture-notes/scripts/cli.ts`, `plugins/lecture-notes/tests/assemble.test.ts`.
 
-**Interfaces:** The skill writes `corrections/<chunk>.json` entries `{segment_idx, from, to}`, then `outline.json`, `summary_note.json`, and `glossary.json`. `assembleLecture(inputs: AssemblyInputs): LectureDocument` applies only exact correction matches, derives referenced times from segments, and calls `validateLecture`. CLI stages `doctor|fetch|prepare|assemble` are restartable from existing files; Task 7 adds `upload`.
+**Interfaces:** Before correction, the skill reads every prepared segment and writes `context/parts/<chunk>.json` plus `context/lecture.json`, summarizing the lecture flow, repeated terms with observed spellings and segment evidence, and possible misrecognitions. For a long lecture, it reads all chunks sequentially and merges their notes rather than truncating the transcript. The skill then writes `corrections/<chunk>.json` entries `{segment_idx, from, to, evidence_segment_idxs, reason}`, followed by `outline.json`, `summary_note.json`, and `glossary.json`. `assembleLecture(inputs: AssemblyInputs): LectureDocument` applies only exact correction matches, derives referenced times from segments, and calls `validateLecture`. CLI stages `doctor|fetch|prepare|assemble` are restartable from existing files; Task 7 adds `upload`.
 
-- [ ] **Step 1: Write failing assembly tests.** `test_exact_correction` compares every untargeted segment byte for byte; `test_ambiguous_correction` asserts rejection; `test_outline_coverage` asserts each segment index occurs in one leaf; `test_derived_times` asserts key point and glossary times equal their referenced segment starts.
+- [ ] **Step 1: Write failing assembly tests.** `test_exact_correction` compares every untargeted segment byte for byte; `test_ambiguous_correction` asserts rejection; `test_correction_evidence_refs` rejects missing or out-of-range evidence segment references; `test_outline_coverage` asserts each segment index occurs in one leaf; `test_derived_times` asserts key point and glossary times equal their referenced segment starts.
 - [ ] **Step 2: Run `deno test plugins/lecture-notes/tests/assemble.test.ts` red.**
-- [ ] **Step 3: Implement assembly and skill instructions.** The skill first calls doctor/fetch/prepare, performs conservative per-chunk correction, builds 2-level outline and global overview/key points and glossary from corrected segments, writes JSON files, then assembles. It reports model uncertainty and never fabricates a transcript claim; failed jobs preserve intermediates for targeted retry.
+- [ ] **Step 3: Implement assembly and skill instructions.** The skill first calls doctor/fetch/prepare and reads the complete transcript once through bounded chunks to build the whole-lecture context brief. It records recurring terms, their observed spellings and segment evidence, then corrects each chunk using that brief and neighboring source text. Corrections require a short reason and valid source segment references; uncertain candidates remain unchanged. The skill builds the 2-level outline and global overview/key points and glossary from corrected segments, writes JSON files, then assembles. It reports model uncertainty and never fabricates a transcript claim; failed jobs preserve intermediates for targeted retry.
 - [ ] **Step 4: Run tests green** and perform a manual skill dry run on the fixture, verifying valid `lecture.json` and no video file.
 - [ ] **Step 5: Commit:** `feat: assemble grounded lecture notes`.
 
